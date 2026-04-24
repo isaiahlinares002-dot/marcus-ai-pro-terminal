@@ -1,7 +1,0 @@
-streamlit
-yfinance
-pandas
-numpy
-alpaca-trade-api
-ta
-plotly
