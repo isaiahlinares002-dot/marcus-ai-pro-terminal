@@ -1,8 +1,6 @@
 streamlit
-yfinance
 pandas
-numpy
-plotly
-scikit-learn
+yfinance
 supabase
 streamlit-autorefresh
+plotly
