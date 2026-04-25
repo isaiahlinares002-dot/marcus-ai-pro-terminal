@@ -67,16 +67,27 @@ if not st.session_state.auth:
 else:
     user_name = st.session_state.user
     bal_res = supabase.table("users").select("balance").eq("username", user_name).execute()
-    # Fixed balance fetching
     current_balance = float(bal_res.data[0]['balance'])
 
     st.markdown(f"<h1>OPERATOR: {user_name.upper()}</h1>", unsafe_allow_html=True)
-    ticker = st.sidebar.selectbox("ASSET", ["BTC-USD", "NVDA", "AAPL", "TSLA", "ETH-USD"])
+    
+    # 75+ TICKER LIST RESTORED
+    tickers = [
+        "BTC-USD", "ETH-USD", "SOL-USD", "NVDA", "AAPL", "TSLA", "AMD", "MSFT", "GOOGL", "AMZN", 
+        "META", "NFLX", "COIN", "MARA", "RIOT", "MSTR", "PLTR", "BABA", "NIO", "XPEV", 
+        "AMC", "GME", "BB", "SQ", "PYPL", "SHOP", "DIS", "T", "VZ", "F", "GM", "LCID", 
+        "RIVN", "HOOD", "UBER", "LYFT", "ABNB", "COKE", "PEP", "KO", "SBUX", "WMT", 
+        "COST", "TGT", "JPM", "BAC", "GS", "MS", "V", "MA", "DKNG", "PENN", "U", 
+        "RBLX", "SNAP", "ZM", "PTON", "DASH", "OPEN", "SOFI", "AI", "C3AI", "PATH", 
+        "SNOW", "NET", "CRWD", "OKTA", "ZS", "DDOG", "DOCU", "UPST", "AFRM", "CHPT", 
+        "BLNK", "SPY", "QQQ", "IWM", "DIA", "GLD", "SLV", "USO", "UNG"
+    ]
+    
+    ticker = st.sidebar.selectbox("ASSET", tickers)
     qty = st.sidebar.number_input("QUANTITY", min_value=1, value=1)
     
     data = yf.download(ticker, period="1d", interval="1m")
     if not data.empty:
-        # THE NUCLEAR FIX: .values.flatten() grabs just the raw numbers, [-1] grabs the last one
         live_price = float(data['Close'].values.flatten()[-1])
         
         y = data['Close'].values.flatten()
@@ -88,11 +99,11 @@ else:
         m1.metric("LIVE PRICE", f"${live_price:,.2f}", delta=f"{slope:.4f}")
         m2.metric("CASH", f"${current_balance:,.2f}")
         
-        # P/L FIX: Subtracting 100k starting capital
         total_pl = current_balance - 100000.0
         m3.metric("TOTAL P/L", f"${total_pl:,.2f}", delta=f"{total_pl:,.2f}", delta_color="normal")
 
-        st.line_chart(data['Close'])
+        # BAR CHART RESTORED
+        st.bar_chart(data['Close'])
 
         if st.sidebar.button("EXECUTE BUY"):
             cost = live_price * qty
