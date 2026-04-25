@@ -31,7 +31,7 @@ def init_supabase():
     try:
         return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
     except:
-        st.error("Missing Secrets!")
+        st.error("Check Secrets!")
         st.stop()
 
 supabase = init_supabase()
@@ -86,10 +86,11 @@ else:
     ticker = st.sidebar.selectbox("ASSET", tickers)
     qty = st.sidebar.number_input("QUANTITY", min_value=1, value=1)
     
-    data = yf.download(ticker, period="1d", interval="1m")
+    with st.spinner("SYNCING MARKET DATA..."):
+        data = yf.download(ticker, period="1d", interval="1m")
+    
     if not data.empty:
         live_price = float(data['Close'].values.flatten()[-1])
-        
         y = data['Close'].values.flatten()
         x = range(len(y))
         raw_slope = (len(x) * (x * y).sum() - sum(x) * sum(y)) / (len(x) * (sum([i**2 for i in x])) - (sum(x)**2))
@@ -102,24 +103,30 @@ else:
         total_pl = current_balance - 100000.0
         m3.metric("TOTAL P/L", f"${total_pl:,.2f}", delta=f"{total_pl:,.2f}", delta_color="normal")
 
-        # --- CANDLESTICK CHART ---
-        fig = go.Figure(data=[go.Candlestick(
-            x=data.index,
-            open=data['Open'],
-            high=data['High'],
-            low=data['Low'],
-            close=data['Close'],
-            increasing_line_color='#00ff00', 
-            decreasing_line_color='#ff0000'
-        )])
-        fig.update_layout(
-            template="plotly_dark",
-            xaxis_rangeslider_visible=False,
-            height=500,
-            margin=dict(l=10, r=10, t=10, b=10)
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        # --- THE CANDLESTICK CHART ---
+        try:
+            fig = go.Figure(data=[go.Candlestick(
+                x=data.index,
+                open=data['Open'],
+                high=data['High'],
+                low=data['Low'],
+                close=data['Close'],
+                increasing_line_color='#00ff00', 
+                decreasing_line_color='#ff0000'
+            )])
+            fig.update_layout(
+                template="plotly_dark",
+                xaxis_rangeslider_visible=False,
+                height=500,
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=10, r=10, t=10, b=10)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.error(f"Chart Error: Ensure 'plotly' is in requirements.txt")
 
+        # Trading buttons
         if st.sidebar.button("EXECUTE BUY"):
             cost = live_price * qty
             if current_balance >= cost:
