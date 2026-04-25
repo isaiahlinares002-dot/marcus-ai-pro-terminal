@@ -7,8 +7,8 @@ import hashlib
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- CONFIG ---
-st.set_page_config(page_title="Marcus.Ai Elite V4", layout="wide")
+# --- CONFIG & UI STYLING ---
+st.set_page_config(page_title="Marcus.Ai Elite V4.6", layout="wide")
 
 st.markdown("""
     <style>
@@ -20,11 +20,12 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# 12-SECOND HEARTBEAT (Auto-refresh)
 st_autorefresh(interval=12000, key="datarefresh")
 
 def init_supabase():
     try: return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-    except: st.error("Secrets Error!"); st.stop()
+    except: st.error("Secrets Error! Check your Streamlit Secrets."); st.stop()
 
 supabase = init_supabase()
 def make_hashes(p): return hashlib.sha256(str.encode(p)).hexdigest()
@@ -32,9 +33,9 @@ def make_hashes(p): return hashlib.sha256(str.encode(p)).hexdigest()
 if 'auth' not in st.session_state: st.session_state.auth = False
 if 'user' not in st.session_state: st.session_state.user = ""
 
-# --- LOGIN (UI UNTOUCHED) ---
+# --- CENTERED LOGIN ---
 if not st.session_state.auth:
-    st.markdown("<br><br><h1>MARCUS ELITE V4</h1>", unsafe_allow_html=True)
+    st.markdown("<br><br><h1>MARCUS ELITE V4.6</h1>", unsafe_allow_html=True)
     _, col2, _ = st.columns([1, 1.5, 1])
     with col2:
         m = st.tabs(["LOGIN", "CREATE ID"])
@@ -53,7 +54,7 @@ if not st.session_state.auth:
                     st.success("SUCCESS.")
                 except: st.error("TAKEN.")
 
-# --- TERMINAL ---
+# --- TRADING TERMINAL ---
 else:
     user = st.session_state.user
     bal_res = supabase.table("users").select("balance").eq("username", user).execute()
@@ -61,6 +62,7 @@ else:
 
     st.markdown(f"<h1>OPERATOR: {user.upper()}</h1>", unsafe_allow_html=True)
     
+    # 75+ TICKER LIST
     tickers = [
         "BTC-USD", "ETH-USD", "SOL-USD", "NVDA", "AAPL", "TSLA", "AMD", "MSFT", "GOOGL", "AMZN", 
         "META", "NFLX", "COIN", "MARA", "RIOT", "MSTR", "PLTR", "BABA", "NIO", "XPEV", 
@@ -80,24 +82,38 @@ else:
         df = data.copy()
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
 
+        # Basic Stats
         live_p = float(df['Close'].values.flatten()[-1])
         y = df['Close'].values.flatten()
         slope = float((len(y) * (range(len(y)) * y).sum() - sum(range(len(y))) * sum(y)) / (len(y) * (sum([i**2 for i in range(len(y))])) - (sum(range(len(y)))**2)))
 
-        # --- SIGNALS ---
-        short_ema = df['Close'].ewm(span=9).mean().iloc[-1]
-        long_ema = df['Close'].ewm(span=21).mean().iloc[-1]
-        if slope > 0 and short_ema > long_ema: ai_sig = "🟢 BUY"
-        elif slope < 0 and short_ema < long_ema: ai_sig = "🔴 SELL"
-        else: ai_sig = "🟡 HOLD"
+        # --- REFINED "ULTRA" AI SIGNAL LOGIC ---
+        df['EMA9'] = df['Close'].ewm(span=9, adjust=False).mean()
+        df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
+        
+        # Volume Force Check
+        avg_vol = df['Volume'].rolling(window=20).mean().iloc[-1]
+        curr_vol = df['Volume'].iloc[-1]
+        vol_surge = curr_vol > (avg_vol * 1.5) 
 
+        last_ema9 = df['EMA9'].iloc[-1]
+        last_ema21 = df['EMA21'].iloc[-1]
+
+        if (last_ema9 > last_ema21) and (slope > 0.005):
+            ai_sig = "🔥 ULTRA BUY" if vol_surge else "🟢 BUY"
+        elif (last_ema9 < last_ema21) and (slope < -0.005):
+            ai_sig = "💀 ULTRA SELL" if vol_surge else "🔴 SELL"
+        else:
+            ai_sig = "🟡 NEUTRAL"
+
+        # --- METRICS UI ---
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("LIVE PRICE", f"${live_p:,.2f}", delta=f"{slope:.4f}")
-        c2.metric("SIGNAL", ai_sig)
+        c2.metric("ELITE SIGNAL", ai_sig)
         c3.metric("CASH", f"${balance:,.2f}")
         c4.metric("TOTAL P/L", f"${(balance-100000):,.2f}", delta=f"{(balance-100000):,.2f}", delta_color="normal")
 
-        # --- CANDLESTICKS ---
+        # --- CANDLESTICK CHART ---
         fig = go.Figure(data=[go.Candlestick(
             x=df.index, open=df['Open'].values.flatten(), high=df['High'].values.flatten(),
             low=df['Low'].values.flatten(), close=df['Close'].values.flatten(),
@@ -106,6 +122,7 @@ else:
         fig.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=450, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, width='stretch', theme=None)
 
+        # --- EXECUTION BUTTONS ---
         if st.sidebar.button("EXECUTE BUY"):
             if balance >= (live_p * qty):
                 new_bal = balance - (live_p * qty)
@@ -120,5 +137,7 @@ else:
             st.rerun()
 
     st.markdown("---")
+    # Trade History Table
     hist = supabase.table("trades").select("*").order("created_at", desc=True).limit(10).execute()
-    if hist.data: st.dataframe(pd.DataFrame(hist.data)[['username', 'symbol', 'type', 'qty', 'price', 'total']], width='stretch')
+    if hist.data: 
+        st.dataframe(pd.DataFrame(hist.data)[['username', 'symbol', 'type', 'qty', 'price', 'total']], width='stretch')
