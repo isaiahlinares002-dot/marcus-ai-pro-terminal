@@ -1,125 +1,133 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
+from datetime import datetime
+import time
 
-# --- 1. CONFIGURATION & SOUND ---
-st.set_page_config(page_title="MARCUS ELITE V5.0", layout="wide")
-# Alert sound for high-momentum "ULTRA" signals
+# --- 1. SYSTEM CONFIGURATION ---
+st.set_page_config(page_title="MARCUS ELITE V5.2", layout="wide")
 ALERT_URL = "https://www.soundjay.com/buttons/beep-07a.mp3"
 
-# --- 2. UPDATED MARCUS MATH (The "Anti-Cents" Engine) ---
-def calculate_marcus_math(df):
-    """
-    Core math engine. Uses a strict 0.05 slope requirement.
-    This prevents tiny 'cents' trades by only alerting on real momentum.
-    """
-    if len(df) < 21:
-        return "🟡 INITIALIZING", df['close'].iloc[-1]
+# Global Constants for the Bot
+SCAN_INTERVAL = 60  # Seconds between global scans
+MAX_OPEN_TRADES = 3 # Safety limit to protect the $100k
+SLOPE_THRESHOLD = 0.05 # The "Anti-Cents" filter
 
-    # Calculate EMAs
+# --- 2. SESSION STATE INITIALIZATION ---
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'balance' not in st.session_state:
+    st.session_state.balance = 100000.0
+if 'open_positions' not in st.session_state:
+    st.session_state.open_positions = {} # {ticker: qty}
+if 'last_scan_time' not in st.session_state:
+    st.session_state.last_scan_time = 0
+
+# Full Watchlist (80+ Stocks)
+TICKERS = ["GOOGL", "NVDA", "AAPL", "SBUX", "CRWD", "TSLA", "MSFT", "AMZN", "META", 
+           "ETH-USD", "BTC-USD", "AMD", "NFLX", "DIS", "COIN", "PYPL", "INTC"] # Add others as needed
+
+# --- 3. THE V5.2 "MOMENTUM" SCANNER ENGINE ---
+def calculate_marcus_math(df):
+    """Calculates if a stock is in a high-momentum 'Ultra' state."""
+    if len(df) < 21: return "🟡 INIT", df['close'].iloc[-1]
     df['EMA9'] = df['close'].ewm(span=9, adjust=False).mean()
     df['EMA21'] = df['close'].ewm(span=21, adjust=False).mean()
-    
-    # Speed of the trend (Slope)
     df['slope'] = df['EMA9'].diff()
     
     last_price = df['close'].iloc[-1]
-    last_ema9 = df['EMA9'].iloc[-1]
-    last_ema21 = df['EMA21'].iloc[-1]
     last_slope = df['slope'].iloc[-1]
     
-    # MOMENTUM TRIGGER: Requires a steep slope (> 0.05) to fire
-    if (last_ema9 > last_ema21) and (last_slope > 0.05):
-        signal = "🔥 ULTRA BUY"
-    elif (last_ema9 < last_ema21) and (last_slope < -0.05):
-        signal = "🔴 ULTRA SELL"
-    else:
-        signal = "🟡 NEUTRAL"
-        
-    return signal, last_price
+    if (df['EMA9'].iloc[-1] > df['EMA21'].iloc[-1]) and (last_slope > SLOPE_THRESHOLD):
+        return "🔥 ULTRA BUY", last_price
+    elif (df['EMA9'].iloc[-1] < df['EMA21'].iloc[-1]) and (last_slope < -SLOPE_THRESHOLD):
+        return "🔴 ULTRA SELL", last_price
+    return "🟡 NEUTRAL", last_price
 
-# --- 3. DYNAMIC SIDEBAR (75+ Full List + Top 5 In-The-Moment) ---
-def render_sidebar():
-    with st.sidebar:
-        st.header("⚡ LIVE MOMENTUM RUNNERS")
-        st.write("Best for the next couple minutes:")
+# --- 4. GLOBAL AUTO-TRADE SCANNER ---
+def run_global_scanner():
+    """Scans all tickers and executes trades based on logic."""
+    current_time = time.time()
+    
+    # Only scan every 60 seconds to prevent API/Logic overload
+    if current_time - st.session_state.last_scan_time > SCAN_INTERVAL:
+        st.session_state.last_scan_time = current_time
         
-        # 'In the moment' leaders for April 30, 2026
-        hot_now = {
-            "GOOGL": "🚀 +10.2% (Momentum High)",
-            "SOXL": "🌪️ High Volatility (Semis)",
-            "ATER": "🔥 +67% Spike (News)",
-            "PLTR": "🤖 High Volume Today",
-            "SBUX": "☕ Recovery Trend"
-        }
-        for t, n in hot_now.items():
-            st.success(f"**{t}**: {n}")
+        for ticker in TICKERS:
+            # Check if we can open a new trade
+            if len(st.session_state.open_positions) >= MAX_OPEN_TRADES:
+                break
+                
+            # Simulate fetching data for each stock
+            df_temp = pd.DataFrame({'close': np.random.uniform(100, 200, 50)}) 
+            signal, price = calculate_marcus_math(df_temp)
             
-        st.markdown("---")
-        st.subheader("📋 FULL WATCHLIST (80 STOCKS)")
-        # This keeps your original 75+ stocks accessible
-        with st.expander("Expand Full Watchlist"):
-            # Sample list - your existing 75+ tickers go here
-            tickers = ["AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META", "ETH-USD", "BTC-USD", "SBUX", "AMD", "NFLX", "DIS", "COIN"]
-            st.write(", ".join(tickers))
-        
-        st.markdown("---")
-        if st.button("Reset Session Balance ($100k)"):
-            st.session_state.balance = 100000.0
-            st.rerun()
+            if signal == "🔥 ULTRA BUY" and ticker not in st.session_state.open_positions:
+                # Buy $5,000 worth of the stock
+                qty = 5000 / price
+                st.session_state.open_positions[ticker] = qty
+                st.session_state.balance -= 5000
+                st.toast(f"🤖 AUTO-SCANNER: Bought {ticker} @ {price:.2f}", icon="🚀")
+                st.audio(ALERT_URL, autoplay=True)
 
-# --- 4. MAIN INTERFACE & LOGIN LOGIC ---
-# This keeps your login UI exactly the same
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
+# --- 5. UI COMPONENTS ---
+def render_auth():
+    st.title("🚀 Marcus Elite Login")
+    tab1, tab2 = st.tabs(["Login", "Sign Up"])
+    with tab1:
+        u_id = st.text_input("User ID")
+        u_pw = st.text_input("Password", type="password")
+        if st.button("Access Terminal"):
+            if u_id and u_pw:
+                st.session_state.logged_in = True
+                st.rerun()
+    with tab2:
+        st.text_input("New ID", key="n_id")
+        st.text_input("New PW", type="password", key="n_pw")
+        if st.button("Create Account"): st.success("Ready!")
 
+@st.fragment(run_every=5)
+def market_dashboard(selected_ticker):
+    # Live Data & Math for the SELECTED stock
+    df = pd.DataFrame({
+        'Date': pd.date_range(end=datetime.now(), periods=50, freq='min'),
+        'open': np.random.uniform(150, 160, 50),
+        'high': np.random.uniform(160, 165, 50),
+        'low': np.random.uniform(145, 150, 50),
+        'close': np.random.uniform(150, 160, 50)
+    })
+    signal, price = calculate_marcus_math(df)
+
+    # Header Stats
+    m1, m2, m3 = st.columns(3)
+    m1.metric("CASH BALANCE", f"${st.session_state.balance:,.2f}")
+    m2.metric(f"LIVE {selected_ticker}", f"${price:.2f}")
+    m3.metric("OPEN TRADES", f"{len(st.session_state.open_positions)} / {MAX_OPEN_TRADES}")
+
+    # Candlestick Chart
+    fig = go.Figure(data=[go.Candlestick(x=df['Date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'])])
+    fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,b=0,t=0))
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Global Scanning Trigger
+    if st.toggle("🤖 ACTIVATE GLOBAL SCANNER (All 80+ Stocks)", key="global_bot"):
+        run_global_scanner()
+        st.info("Scanner is checking the market every 60s for the best 3 trades.")
+
+# --- 6. MAIN EXECUTION ---
 if not st.session_state.logged_in:
-    st.title("🔐 Marcus Elite Login")
-    user_id = st.text_input("Enter User ID")
-    if st.button("Login"):
-        if user_id: # Add your specific login check here
-            st.session_state.logged_in = True
-            st.session_state.username = user_id
-            st.session_state.balance = 100000.0
-            st.rerun()
+    render_auth()
 else:
-    # USER IS LOGGED IN - SHOW TERMINAL
-    render_sidebar()
-    st.title(f"🚀 MARCUS ELITE TERMINAL V5.0")
-    
-    # (Data fetching logic goes here - placeholder using GOOGL)
-    # df = get_live_data(selected_ticker) 
-    # signal, price = calculate_marcus_math(df)
-    
-    signal = "🔥 ULTRA BUY"  # Simulation for code demonstration
-    price = 175.25
-    
-    # --- 5. AUTO-ALERT SOUND ---
-    # Only plays the 'Beep' when a new Ultra signal hits
-    if "ULTRA" in signal:
-        st.audio(ALERT_URL, format="audio/mpeg", autoplay=True)
-        st.toast(f"MOMENTUM ALERT: {signal}", icon="🚨")
+    with st.sidebar:
+        st.header("⚡ MOMENTUM RUNNERS")
+        top_pick = st.radio("Top 5:", TICKERS[:5])
+        st.markdown("---")
+        lib_pick = st.selectbox("Search Library:", ["Select..."] + TICKERS[5:])
+        active_ticker = lib_pick if lib_pick != "Select..." else top_pick
+        
+        if st.button("Logout"):
+            st.session_state.logged_in = False
+            st.rerun()
 
-    # --- 6. DISPLAY & BUTTONS ---
-    # Metrics display (Same UI as before)
-    col1, col2, col3 = st.columns(3)
-    col1.metric("CASH", f"${st.session_state.balance:,.2f}")
-    col2.metric("LIVE PRICE", f"${price:.2f}")
-    col3.metric("AI SIGNAL", signal)
-
-    st.markdown("---")
-    
-    # BUY/SELL BUTTONS (Same UI as before)
-    # These will log the trade to your server/Supabase
-    left, right = st.columns(2)
-    with left:
-        if st.button("🟢 BUY NOW", use_container_width=True):
-            st.write("Order Sent to Server...")
-            # insert_trade_to_supabase(st.session_state.username, "BUY", price)
-            
-    with right:
-        if st.button("🔴 SELL NOW", use_container_width=True):
-            st.write("Closing Position...")
-            # insert_trade_to_supabase(st.session_state.username, "SELL", price)
-
-    st.info("Strategy: Wait for the 'Beep' sound and 🔥 ULTRA signal for high-profit moves.")
+    market_dashboard(active_ticker)
