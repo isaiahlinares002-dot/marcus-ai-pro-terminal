@@ -7,36 +7,14 @@ import pytz
 from supabase import create_client, Client
 
 # --- 1. CONFIG & SYSTEM KEYS ---
-st.set_page_config(page_title="MARCUS ELITE V5.8", layout="wide")
+st.set_page_config(page_title="MARCUS ELITE V5.9", layout="wide")
 toronto_tz = pytz.timezone('America/Toronto')
 
-# Credentials
 SUPABASE_URL = "https://xhxzhnzwvxmycdskjarr.supabase.co"
 SUPABASE_KEY = "sb_publishable_EpR9PlXgtAapPdOjOqUZow_2BqBuOWo"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- 2. THE IMPROVED MATH (ULTRA LOGIC) ---
-def calculate_marcus_signals(df):
-    if len(df) < 21:
-        return "🟡 INITIALIZING", df['close'].iloc[-1]
-    
-    df['EMA9'] = df['close'].ewm(span=9, adjust=False).mean()
-    df['EMA21'] = df['close'].ewm(span=21, adjust=False).mean()
-    df['slope'] = df['EMA9'].diff()
-    
-    last_ema9 = df['EMA9'].iloc[-1]
-    last_ema21 = df['EMA21'].iloc[-1]
-    last_slope = df['slope'].iloc[-1]
-    last_price = df['close'].iloc[-1]
-    
-    if (last_ema9 > last_ema21) and (last_slope > 0.05):
-        return "🔥 ULTRA BUY", last_price
-    elif (last_ema9 < last_ema21) and (last_slope < -0.05):
-        return "🔴 ULTRA SELL", last_price
-        
-    return "🟡 NEUTRAL", last_price
-
-# --- 3. ASSET LIBRARIES ---
+# --- 2. GLOBAL ASSET LIBRARY ---
 RUNNERS = ["NVDA", "TSLA", "AAPL", "BTC-USD", "ETH-USD"]
 STOCK_LIBRARY = sorted([
     "GOOGL", "MSFT", "AMZN", "META", "NFLX", "AMD", "INTC", "PYPL", "SQ", "SHOP",
@@ -47,98 +25,127 @@ STOCK_LIBRARY = sorted([
     "DKNG", "PENN", "PLUG", "FCEL", "SPCE", "AMC", "GME", "HOOD", "SOFI", "U",
     "NET", "OKTA", "DDOG", "ZS", "CRSR", "LOGI", "RBLX", "SE", "MELI"
 ])
+ALL_ASSETS = list(set(RUNNERS + STOCK_LIBRARY))
 
-# --- 4. SESSION STATE ---
-if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'username' not in st.session_state: st.session_state.username = None
-if 'balance' not in st.session_state: st.session_state.balance = 100000.0
-if 'auto_pilot' not in st.session_state: st.session_state.auto_pilot = False
-
-# --- 5. DATABASE FUNCTIONS ---
-def check_login(u, p):
-    try:
-        res = supabase.table("users").select("*").eq("username", u).eq("password", p).execute()
-        return len(res.data) > 0
-    except: return False
+# --- 3. MATH & DATABASE ---
+def calculate_marcus_signals(df):
+    if len(df) < 21: return "🟡 WAIT", df['close'].iloc[-1]
+    df['EMA9'] = df['close'].ewm(span=9, adjust=False).mean()
+    df['EMA21'] = df['close'].ewm(span=21, adjust=False).mean()
+    df['slope'] = df['EMA9'].diff()
+    last_ema9, last_ema21, last_slope = df['EMA9'].iloc[-1], df['EMA21'].iloc[-1], df['slope'].iloc[-1]
+    last_price = df['close'].iloc[-1]
+    
+    if (last_ema9 > last_ema21) and (last_slope > 0.05): return "🔥 ULTRA BUY", last_price
+    if (last_ema9 < last_ema21) and (last_slope < -0.05): return "🔴 ULTRA SELL", last_price
+    return "🟡 NEUTRAL", last_price
 
 def log_trade(ticker, side, price):
     try:
-        data = {
+        supabase.table("trades").insert({
             "username": st.session_state.username,
             "ticker": ticker,
             "side": side,
             "price": float(price),
             "balance": float(st.session_state.balance),
             "created_at": datetime.now(toronto_tz).isoformat()
-        }
-        supabase.table("trades").insert(data).execute()
-        st.toast(f"✅ {side} {ticker} Logged")
-    except Exception as e: st.error(f"Sync Error: {e}")
+        }).execute()
+        st.toast(f"🚀 AUTO-TRADE: {side} {ticker}")
+    except: pass
 
-# --- 6. USER INTERFACE ---
+# --- 4. SESSION STATE ---
+if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+if 'balance' not in st.session_state: st.session_state.balance = 100000.0
+if 'auto_pilot' not in st.session_state: st.session_state.auto_pilot = False
+
+# --- 5. AUTHENTICATION (Login & Sign Up restored) ---
 if not st.session_state.logged_in:
     st.title("🚀 Marcus Elite Terminal")
-    u = st.text_input("User ID")
-    p = st.text_input("Password", type="password")
-    if st.button("Enter Terminal"):
-        if check_login(u, p):
-            st.session_state.logged_in, st.session_state.username = True, u
-            st.rerun()
+    tab1, tab2 = st.tabs(["Login", "Sign Up"])
+    
+    with tab1:
+        u = st.text_input("User ID")
+        p = st.text_input("Password", type="password")
+        if st.button("Access Terminal"):
+            res = supabase.table("users").select("*").eq("username", u).eq("password", p).execute()
+            if res.data:
+                st.session_state.logged_in, st.session_state.username = True, u
+                st.rerun()
+            else: st.error("Invalid Credentials")
+            
+    with tab2:
+        new_u = st.text_input("Create User ID")
+        new_p = st.text_input("Create Password", type="password")
+        if st.button("Register Elite Account"):
+            try:
+                supabase.table("users").insert({"username": new_u, "password": new_p}).execute()
+                st.success("Account Created! Switch to Login tab.")
+            except: st.error("Username already taken.")
+
 else:
-    # --- Sidebar (STABLE) ---
+    # --- 6. SIDEBAR ---
     with st.sidebar:
         st.header(f"Elite: {st.session_state.username}")
         st.metric("WALLET", f"${st.session_state.balance:,.2f}")
-        if st.button("🔄 RESET BALANCE"): 
-            st.session_state.balance = 100000.0
-            st.rerun()
+        if st.button("🔄 RESET BALANCE"): st.session_state.balance = 100000.0
         
         st.markdown("---")
-        st.session_state.auto_pilot = st.toggle("🤖 ACTIVATE GLOBAL AI PILOT")
-        sel_runner = st.radio("Momentum:", RUNNERS)
-        sel_lib = st.selectbox("Search 80+ Stocks:", ["None"] + STOCK_LIBRARY)
+        st.session_state.auto_pilot = st.toggle("🤖 ACTIVATE GLOBAL AI SCANNER")
+        
+        sel_runner = st.radio("Momentum View:", RUNNERS)
+        sel_lib = st.selectbox("Library Search:", ["None"] + STOCK_LIBRARY)
         active_ticker = sel_lib if sel_lib != "None" else sel_runner
         
         if st.button("Logout"):
             st.session_state.logged_in = False
             st.rerun()
 
-    # --- THE FRAGMENT (AUTO-REFRESHING PORTION) ---
+    # --- 7. THE GLOBAL SCANNER ENGINE ---
+    # This runs every 5 seconds and checks EVERY stock, not just the one you see.
     @st.fragment(run_every=5)
-    def terminal_dashboard(ticker):
+    def global_execution_engine(ticker_view):
         now_toronto = datetime.now(toronto_tz)
+        
+        # UI Header
         c1, c2 = st.columns([3, 1])
-        c1.title(f"📊 {ticker} Terminal")
+        c1.title(f"📊 {ticker_view} Terminal")
         c2.metric("TORONTO (EDT)", now_toronto.strftime("%I:%M:%S %p"))
 
-        # Live Data Simulation
-        df = pd.DataFrame({
+        # Main Chart Data (Simulated for UI)
+        df_ui = pd.DataFrame({
             'Date': pd.date_range(end=now_toronto, periods=50, freq='min'),
-            'open': np.random.uniform(150, 160, 50),
-            'high': np.random.uniform(160, 165, 50),
-            'low': np.random.uniform(145, 150, 50),
-            'close': np.random.uniform(150, 160, 50)
+            'open': np.random.uniform(150, 160, 50), 'high': np.random.uniform(160, 165, 50),
+            'low': np.random.uniform(145, 150, 50), 'close': np.random.uniform(150, 160, 50)
         })
         
-        signal, price = calculate_marcus_signals(df)
-        
-        fig = go.Figure(data=[go.Candlestick(x=df['Date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'])])
-        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=0,r=0,b=0,t=0), xaxis_rangeslider_visible=False)
+        # 🤖 THE GLOBAL SCANNER (Loops through all 80+ assets)
+        if st.session_state.auto_pilot:
+            for asset in ALL_ASSETS:
+                # Simulating a quick scan of each asset's math
+                sim_close = np.random.uniform(100, 500, 25)
+                df_scan = pd.DataFrame({'close': sim_close})
+                sig, px = calculate_marcus_signals(df_scan)
+                
+                if "ULTRA" in sig:
+                    log_trade(asset, sig, px)
+
+        # UI Chart
+        fig = go.Figure(data=[go.Candlestick(x=df_ui['Date'], open=df_ui['open'], high=df_ui['high'], low=df_ui['low'], close=df_ui['close'])])
+        fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,b=0,t=0), xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
 
-        if st.session_state.auto_pilot and "ULTRA" in signal:
-            log_trade(ticker, signal, price)
-
+        # Manual Controls for the ticker you are currently viewing
         st.markdown("---")
         h1, h2, h3 = st.columns(3)
-        h1.metric("Live Price", f"${price:,.2f}")
-        h2.metric("AI Signal", signal)
-        if h3.button(f"📝 MANUAL LOG: {ticker}"):
-            log_trade(ticker, "MANUAL", price)
+        ui_sig, ui_px = calculate_marcus_signals(df_ui)
+        h1.metric("Live Price", f"${ui_px:,.2f}")
+        h2.metric("AI Signal", ui_sig)
+        if h3.button(f"📝 MANUAL LOG: {ticker_view}"):
+            log_trade(ticker_view, "MANUAL", ui_px)
 
-    # Trigger Fragment
-    terminal_dashboard(active_ticker)
+    # Call the engine
+    global_execution_engine(active_ticker)
 
-    if st.button("⚠️ WIPE ALL TRADES", type="primary"):
+    if st.button("⚠️ WIPE ALL DATABASE TRADES", type="primary"):
         supabase.table("trades").delete().eq("username", st.session_state.username).execute()
-        st.success("Wiped.")
+        st.success("Server Cleared.")
