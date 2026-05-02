@@ -7,14 +7,14 @@ import pytz
 from supabase import create_client, Client
 
 # --- 1. CONFIG & SYSTEM KEYS ---
-st.set_page_config(page_title="MARCUS ELITE V6.2", layout="wide")
+st.set_page_config(page_title="MARCUS ELITE V6.4", layout="wide")
 toronto_tz = pytz.timezone('America/Toronto')
 
 SUPABASE_URL = "https://xhxzhnzwvxmycdskjarr.supabase.co"
 SUPABASE_KEY = "sb_publishable_EpR9PlXgtAapPdOjOqUZow_2BqBuOWo"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- 2. GLOBAL ASSET LIBRARY ---
+# --- 2. THE FULL 80+ ASSET LIBRARY ---
 RUNNERS = ["NVDA", "TSLA", "AAPL", "BTC-USD", "ETH-USD"]
 STOCK_LIBRARY = sorted([
     "GOOGL", "MSFT", "AMZN", "META", "NFLX", "AMD", "INTC", "PYPL", "SQ", "SHOP",
@@ -27,7 +27,7 @@ STOCK_LIBRARY = sorted([
 ])
 ALL_ASSETS = list(set(RUNNERS + STOCK_LIBRARY))
 
-# --- 3. MATH & DATABASE ---
+# --- 3. THE ULTRA MATH & DATABASE ENGINE ---
 def calculate_marcus_signals(df):
     if len(df) < 21: return "🟡 WAIT", df['close'].iloc[-1], 0
     df['EMA9'] = df['close'].ewm(span=9, adjust=False).mean()
@@ -40,28 +40,27 @@ def calculate_marcus_signals(df):
     if (last_ema9 < last_ema21) and (last_slope < -0.05): return "🔴 ULTRA SELL", last_price, abs(last_slope)
     return "🟡 NEUTRAL", last_price, 0
 
-def log_trade(ticker, side, price):
+def log_trade(ticker, side, price, qty):
     try:
         supabase.table("trades").insert({
             "username": st.session_state.username,
             "ticker": ticker,
             "side": side,
             "price": float(price),
-            "balance": float(st.session_state.balance),
+            "quantity": float(qty),
+            "cost": float(price * qty),
             "created_at": datetime.now(toronto_tz).isoformat(),
-            "status": "OPEN" # New status tracking
+            "status": "OPEN"
         }).execute()
-        st.session_state.open_positions += 1
-        st.toast(f"🚀 AUTO-ENTRY: {side} {ticker}")
+        st.toast(f"✅ AUTO-ENTRY: {ticker} ({qty:.3f} units)")
     except: pass
 
 # --- 4. SESSION STATE ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'balance' not in st.session_state: st.session_state.balance = 100000.0
-if 'auto_pilot' not in st.session_state: st.session_state.auto_pilot = False
-if 'open_positions' not in st.session_state: st.session_state.open_positions = 0
+if 'balance' not in st.session_state: st.session_state.balance = 100.0
+if 'risk_per_trade' not in st.session_state: st.session_state.risk_per_trade = 25
 
-# --- 5. AUTHENTICATION ---
+# --- 5. AUTHENTICATION (Login & Sign Up restored) ---
 if not st.session_state.logged_in:
     st.title("🚀 Marcus Elite Terminal")
     tab1, tab2 = st.tabs(["Login", "Sign Up"])
@@ -80,79 +79,82 @@ if not st.session_state.logged_in:
         if st.button("Register Elite Account"):
             try:
                 supabase.table("users").insert({"username": new_u, "password": new_p}).execute()
-                st.success("Account Created!")
-            except: st.error("Error creating account.")
+                st.success("Account Created! Switch to Login.")
+            except: st.error("Username taken.")
 else:
-    # --- 6. SIDEBAR ---
+    # --- 6. SIDEBAR (UI & Risk Management) ---
     with st.sidebar:
         st.header(f"Elite: {st.session_state.username}")
         
-        # P/L Logic & Slot Management
+        # Risk Controller
+        st.session_state.balance = st.number_input("Wallet ($)", value=float(st.session_state.balance))
+        st.session_state.risk_per_trade = st.slider("Risk Per Trade (%)", 5, 100, 25)
+        
+        # P/L & Slot Logic
         try:
             trade_res = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "OPEN").execute()
-            st.session_state.open_positions = len(trade_res.data)
+            open_count = len(trade_res.data)
             
-            # Simulated Live P/L
             current_pl = 0
             for t in trade_res.data:
-                live_change = np.random.uniform(-0.02, 0.03) # Simulated drift
-                current_pl += (t['price'] * live_change)
+                # Simulation logic for P/L while training
+                change = np.random.uniform(-0.01, 0.02)
+                current_pl += (t['price'] * t['quantity'] * change)
                 
-                # AUTO-EXIT LOGIC (Take Profit at 1% or Stop Loss at 0.5%)
-                if live_change >= 0.01 or live_change <= -0.005:
+                # Auto-Exit (Recycle Slots)
+                if change >= 0.01 or change <= -0.005:
                     supabase.table("trades").update({"status": "CLOSED"}).eq("id", t['id']).execute()
-                    st.session_state.balance += (t['price'] * live_change)
-                    st.toast(f"🔒 EXIT: {t['ticker']} at {live_change*100:.2f}%")
-
+                    st.session_state.balance += (t['price'] * t['quantity'] * (1 + change))
+            
             st.metric("TOTAL P/L", f"${current_pl:,.2f}", delta=f"{current_pl:,.2f}")
         except: st.metric("TOTAL P/L", "$0.00")
 
         st.metric("WALLET", f"${st.session_state.balance:,.2f}")
-        st.metric("ACTIVE SLOTS", f"{st.session_state.open_positions} / 4")
+        st.metric("ACTIVE SLOTS", f"{open_count} / 4")
         
-        if st.button("🔄 RESET ALL"): 
-            st.session_state.balance = 100000.0
-            st.session_state.open_positions = 0
+        if st.button("🔄 RESET SYSTEM"): 
+            st.session_state.balance = 100.0
             st.rerun()
-        
+            
         st.markdown("---")
         st.session_state.auto_pilot = st.toggle("🤖 CLASSROOM AUTOPILOT")
-        sel_runner = st.radio("View:", RUNNERS)
-        active_ticker = sel_runner
+        sel_runner = st.radio("Momentum:", RUNNERS)
+        sel_lib = st.selectbox("Library Search:", ["None"] + STOCK_LIBRARY)
+        active_ticker = sel_lib if sel_lib != "None" else sel_runner
         
         if st.button("Logout"):
             st.session_state.logged_in = False
             st.rerun()
 
-    # --- 7. THE ROLLING SCANNER ENGINE ---
+    # --- 7. THE BUDGET-AWARE ROLLING ENGINE ---
     @st.fragment(run_every=5)
     def global_execution_engine(ticker_view):
         now_toronto = datetime.now(toronto_tz)
-        
-        st.title(f"📊 {ticker_view} Live Feed")
-        
-        # UI Chart Data
+        c1, c2 = st.columns([3, 1])
+        c1.title(f"📊 {ticker_view} Terminal")
+        c2.metric("TORONTO (EDT)", now_toronto.strftime("%I:%M:%S %p"))
+
+        # Main Chart Data
         df_ui = pd.DataFrame({
             'Date': pd.date_range(end=now_toronto, periods=50, freq='min'),
             'open': np.random.uniform(150, 160, 50), 'high': np.random.uniform(160, 165, 50),
             'low': np.random.uniform(145, 150, 50), 'close': np.random.uniform(150, 160, 50)
         })
         
-        # 🤖 ROLLING SCANNER (Always looking for a gap in the 4 slots)
-        if st.session_state.auto_pilot and st.session_state.open_positions < 4:
-            available_slots = 4 - st.session_state.open_positions
+        # 🤖 THE BUDGET SCANNER
+        if st.session_state.auto_pilot and open_count < 4:
+            budget_per_slot = st.session_state.balance * (st.session_state.risk_per_trade / 100)
             potential_trades = []
             
             for asset in ALL_ASSETS:
-                sim_close = np.random.uniform(100, 500, 25)
-                df_scan = pd.DataFrame({'close': sim_close})
-                sig, px, conviction = calculate_marcus_signals(df_scan)
-                if "ULTRA" in sig:
-                    potential_trades.append({'ticker': asset, 'sig': sig, 'px': px, 'score': conviction})
+                sig, px, score = calculate_marcus_signals(pd.DataFrame({'close': np.random.uniform(100, 500, 25)}))
+                if "ULTRA" in sig and budget_per_slot > 0:
+                    potential_trades.append({'ticker': asset, 'sig': sig, 'px': px, 'score': score, 'qty': budget_per_slot / px})
             
             top_trades = sorted(potential_trades, key=lambda x: x['score'], reverse=True)
-            for t in top_trades[:available_slots]:
-                log_trade(t['ticker'], t['sig'], t['px'])
+            for t in top_trades[:(4 - open_count)]:
+                log_trade(t['ticker'], t['sig'], t['px'], t['qty'])
+                st.session_state.balance -= (t['px'] * t['qty'])
 
         fig = go.Figure(data=[go.Candlestick(x=df_ui['Date'], open=df_ui['open'], high=df_ui['high'], low=df_ui['low'], close=df_ui['close'])])
         fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,b=0,t=0), xaxis_rangeslider_visible=False)
@@ -164,6 +166,7 @@ else:
         h1.metric("Live Price", f"${ui_px:,.2f}")
         h2.metric("AI Signal", ui_sig)
         if h3.button(f"📝 MANUAL LOG: {ticker_view}"):
-            log_trade(ticker_view, "MANUAL", ui_px)
+            qty = (st.session_state.balance * (st.session_state.risk_per_trade / 100)) / ui_px
+            log_trade(ticker_view, "MANUAL", ui_px, qty)
 
     global_execution_engine(active_ticker)
