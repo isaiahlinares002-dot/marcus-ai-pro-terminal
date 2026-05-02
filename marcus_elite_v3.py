@@ -7,15 +7,16 @@ import pytz
 from supabase import create_client, Client
 
 # --- 1. CONFIG & SYSTEM KEYS ---
-st.set_page_config(page_title="MARCUS ELITE V6.4", layout="wide")
+st.set_page_config(page_title="MARCUS ELITE V6.5", layout="wide")
 toronto_tz = pytz.timezone('America/Toronto')
 
 SUPABASE_URL = "https://xhxzhnzwvxmycdskjarr.supabase.co"
 SUPABASE_KEY = "sb_publishable_EpR9PlXgtAapPdOjOqUZow_2BqBuOWo"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- 2. THE FULL 80+ ASSET LIBRARY ---
+# --- 2. ASSET LIBRARY (Big Tech + Small-Caps Under $100) ---
 RUNNERS = ["NVDA", "TSLA", "AAPL", "BTC-USD", "ETH-USD"]
+# Added the affordable growth stocks: VNCE, DNUT, CGTX, IH, LUMN
 STOCK_LIBRARY = sorted([
     "GOOGL", "MSFT", "AMZN", "META", "NFLX", "AMD", "INTC", "PYPL", "SQ", "SHOP",
     "CRWD", "PLTR", "SNOW", "TSM", "ASML", "SBUX", "DIS", "BA", "CAT", "GE",
@@ -23,7 +24,8 @@ STOCK_LIBRARY = sorted([
     "PFE", "MRNA", "UNH", "XOM", "CVX", "COST", "WMT", "TGT", "NKE", "F",
     "GM", "RIVN", "LCID", "BABA", "JD", "PDD", "BIDU", "NTES", "LI", "XPEV",
     "DKNG", "PENN", "PLUG", "FCEL", "SPCE", "AMC", "GME", "HOOD", "SOFI", "U",
-    "NET", "OKTA", "DDOG", "ZS", "CRSR", "LOGI", "RBLX", "SE", "MELI"
+    "NET", "OKTA", "DDOG", "ZS", "CRSR", "LOGI", "RBLX", "SE", "MELI",
+    "VNCE", "DNUT", "CGTX", "IH", "LUMN"
 ])
 ALL_ASSETS = list(set(RUNNERS + STOCK_LIBRARY))
 
@@ -60,7 +62,7 @@ if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'balance' not in st.session_state: st.session_state.balance = 100.0
 if 'risk_per_trade' not in st.session_state: st.session_state.risk_per_trade = 25
 
-# --- 5. AUTHENTICATION (Login & Sign Up restored) ---
+# --- 5. AUTHENTICATION (Restored) ---
 if not st.session_state.logged_in:
     st.title("🚀 Marcus Elite Terminal")
     tab1, tab2 = st.tabs(["Login", "Sign Up"])
@@ -79,29 +81,26 @@ if not st.session_state.logged_in:
         if st.button("Register Elite Account"):
             try:
                 supabase.table("users").insert({"username": new_u, "password": new_p}).execute()
-                st.success("Account Created! Switch to Login.")
-            except: st.error("Username taken.")
+                st.success("Account Created! Switch to Login tab.")
+            except: st.error("Username already taken.")
 else:
-    # --- 6. SIDEBAR (UI & Risk Management) ---
+    # --- 6. SIDEBAR (HUD & Risk Management) ---
     with st.sidebar:
         st.header(f"Elite: {st.session_state.username}")
         
-        # Risk Controller
+        # Risk Management for Small Accounts
         st.session_state.balance = st.number_input("Wallet ($)", value=float(st.session_state.balance))
         st.session_state.risk_per_trade = st.slider("Risk Per Trade (%)", 5, 100, 25)
         
-        # P/L & Slot Logic
         try:
             trade_res = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "OPEN").execute()
             open_count = len(trade_res.data)
             
+            # P/L Logic for Active Training
             current_pl = 0
             for t in trade_res.data:
-                # Simulation logic for P/L while training
                 change = np.random.uniform(-0.01, 0.02)
                 current_pl += (t['price'] * t['quantity'] * change)
-                
-                # Auto-Exit (Recycle Slots)
                 if change >= 0.01 or change <= -0.005:
                     supabase.table("trades").update({"status": "CLOSED"}).eq("id", t['id']).execute()
                     st.session_state.balance += (t['price'] * t['quantity'] * (1 + change))
@@ -109,7 +108,7 @@ else:
             st.metric("TOTAL P/L", f"${current_pl:,.2f}", delta=f"{current_pl:,.2f}")
         except: st.metric("TOTAL P/L", "$0.00")
 
-        st.metric("WALLET", f"${st.session_state.balance:,.2f}")
+        st.metric("CURRENT WALLET", f"${st.session_state.balance:,.2f}")
         st.metric("ACTIVE SLOTS", f"{open_count} / 4")
         
         if st.button("🔄 RESET SYSTEM"): 
@@ -126,7 +125,7 @@ else:
             st.session_state.logged_in = False
             st.rerun()
 
-    # --- 7. THE BUDGET-AWARE ROLLING ENGINE ---
+    # --- 7. THE ROLLING SCANNER ---
     @st.fragment(run_every=5)
     def global_execution_engine(ticker_view):
         now_toronto = datetime.now(toronto_tz)
@@ -134,20 +133,20 @@ else:
         c1.title(f"📊 {ticker_view} Terminal")
         c2.metric("TORONTO (EDT)", now_toronto.strftime("%I:%M:%S %p"))
 
-        # Main Chart Data
+        # Main HUD Chart
         df_ui = pd.DataFrame({
             'Date': pd.date_range(end=now_toronto, periods=50, freq='min'),
             'open': np.random.uniform(150, 160, 50), 'high': np.random.uniform(160, 165, 50),
             'low': np.random.uniform(145, 150, 50), 'close': np.random.uniform(150, 160, 50)
         })
         
-        # 🤖 THE BUDGET SCANNER
+        # 🤖 ROLLING SCANNER (Budget-Aware)
         if st.session_state.auto_pilot and open_count < 4:
             budget_per_slot = st.session_state.balance * (st.session_state.risk_per_trade / 100)
             potential_trades = []
             
             for asset in ALL_ASSETS:
-                sig, px, score = calculate_marcus_signals(pd.DataFrame({'close': np.random.uniform(100, 500, 25)}))
+                sig, px, score = calculate_marcus_signals(pd.DataFrame({'close': np.random.uniform(1, 500, 25)}))
                 if "ULTRA" in sig and budget_per_slot > 0:
                     potential_trades.append({'ticker': asset, 'sig': sig, 'px': px, 'score': score, 'qty': budget_per_slot / px})
             
