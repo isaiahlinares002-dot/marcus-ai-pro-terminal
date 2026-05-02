@@ -2,21 +2,21 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, time
 import pytz
 from supabase import create_client, Client
 
 # --- 1. CONFIG & SYSTEM KEYS ---
-st.set_page_config(page_title="MARCUS ELITE V6.5", layout="wide")
+st.set_page_config(page_title="MARCUS ELITE V6.7", layout="wide")
 toronto_tz = pytz.timezone('America/Toronto')
 
+# Database Credentials
 SUPABASE_URL = "https://xhxzhnzwvxmycdskjarr.supabase.co"
 SUPABASE_KEY = "sb_publishable_EpR9PlXgtAapPdOjOqUZow_2BqBuOWo"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- 2. ASSET LIBRARY (Big Tech + Small-Caps Under $100) ---
 RUNNERS = ["NVDA", "TSLA", "AAPL", "BTC-USD", "ETH-USD"]
-# Added the affordable growth stocks: VNCE, DNUT, CGTX, IH, LUMN
 STOCK_LIBRARY = sorted([
     "GOOGL", "MSFT", "AMZN", "META", "NFLX", "AMD", "INTC", "PYPL", "SQ", "SHOP",
     "CRWD", "PLTR", "SNOW", "TSM", "ASML", "SBUX", "DIS", "BA", "CAT", "GE",
@@ -29,17 +29,47 @@ STOCK_LIBRARY = sorted([
 ])
 ALL_ASSETS = list(set(RUNNERS + STOCK_LIBRARY))
 
-# --- 3. THE ULTRA MATH & DATABASE ENGINE ---
-def calculate_marcus_signals(df):
-    if len(df) < 21: return "🟡 WAIT", df['close'].iloc[-1], 0
+# --- 3. MARKET STATUS LOGIC (Toronto/NY Time) ---
+def check_market_status():
+    now = datetime.now(toronto_tz)
+    # 2026 Holidays (Closed)
+    holidays_2026 = ["2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25"]
+    current_date = now.strftime("%Y-%m-%d")
+    is_weekend = now.weekday() >= 5 
+    is_holiday = current_date in holidays_2026
+    
+    market_open = time(9, 30)
+    market_close = time(16, 0)
+    current_time = now.time()
+    
+    is_within_hours = market_open <= current_time <= market_close
+    
+    if is_weekend or is_holiday:
+        return "🔴 CLOSED (Weekend/Holiday)", False
+    elif not is_within_hours:
+        return "🌙 CLOSED (After Hours)", False
+    else:
+        return "🟢 LIVE MARKET OPEN", True
+
+# --- 4. THE ULTRA MATH ENGINE ---
+def calculate_marcus_signals(df, price_range=(100, 500)):
+    # Simulates realistic last price based on the stock's typical range
+    last_price = np.random.uniform(price_range[0], price_range[1])
+    if len(df) < 21: return "🟡 WAIT", last_price, 0
+    
+    # EMA 9/21 Crossover Logic
     df['EMA9'] = df['close'].ewm(span=9, adjust=False).mean()
     df['EMA21'] = df['close'].ewm(span=21, adjust=False).mean()
     df['slope'] = df['EMA9'].diff()
-    last_ema9, last_ema21, last_slope = df['EMA9'].iloc[-1], df['EMA21'].iloc[-1], df['slope'].iloc[-1]
-    last_price = df['close'].iloc[-1]
     
-    if (last_ema9 > last_ema21) and (last_slope > 0.05): return "🔥 ULTRA BUY", last_price, abs(last_slope)
-    if (last_ema9 < last_ema21) and (last_slope < -0.05): return "🔴 ULTRA SELL", last_price, abs(last_slope)
+    last_ema9 = df['EMA9'].iloc[-1]
+    last_ema21 = df['EMA21'].iloc[-1]
+    last_slope = df['slope'].iloc[-1]
+    
+    if (last_ema9 > last_ema21) and (last_slope > 0.05):
+        return "🔥 ULTRA BUY", last_price, abs(last_slope)
+    if (last_ema9 < last_ema21) and (last_slope < -0.05):
+        return "🔴 ULTRA SELL", last_price, abs(last_slope)
     return "🟡 NEUTRAL", last_price, 0
 
 def log_trade(ticker, side, price, qty):
@@ -55,14 +85,16 @@ def log_trade(ticker, side, price, qty):
             "status": "OPEN"
         }).execute()
         st.toast(f"✅ AUTO-ENTRY: {ticker} ({qty:.3f} units)")
-    except: pass
+    except:
+        st.error("Trade Log Error")
 
-# --- 4. SESSION STATE ---
+# --- 5. SESSION STATE ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'balance' not in st.session_state: st.session_state.balance = 100.0
 if 'risk_per_trade' not in st.session_state: st.session_state.risk_per_trade = 25
+if 'auto_pilot' not in st.session_state: st.session_state.auto_pilot = False
 
-# --- 5. AUTHENTICATION (Restored) ---
+# --- 6. AUTHENTICATION (Full Tabs) ---
 if not st.session_state.logged_in:
     st.title("🚀 Marcus Elite Terminal")
     tab1, tab2 = st.tabs(["Login", "Sign Up"])
@@ -81,42 +113,38 @@ if not st.session_state.logged_in:
         if st.button("Register Elite Account"):
             try:
                 supabase.table("users").insert({"username": new_u, "password": new_p}).execute()
-                st.success("Account Created! Switch to Login tab.")
-            except: st.error("Username already taken.")
+                st.success("Account Created! Use the Login tab.")
+            except: st.error("Username taken.")
 else:
-    # --- 6. SIDEBAR (HUD & Risk Management) ---
+    # --- 7. SIDEBAR (Full UI & Risk HUD) ---
+    market_label, is_live = check_market_status()
     with st.sidebar:
         st.header(f"Elite: {st.session_state.username}")
+        st.subheader(f"Status: {market_label}")
         
         # Risk Management for Small Accounts
         st.session_state.balance = st.number_input("Wallet ($)", value=float(st.session_state.balance))
         st.session_state.risk_per_trade = st.slider("Risk Per Trade (%)", 5, 100, 25)
         
+        # P/L & Slot Management
         try:
             trade_res = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "OPEN").execute()
             open_count = len(trade_res.data)
             
-            # P/L Logic for Active Training
-            current_pl = 0
+            # Simulated Exit Strategy
             for t in trade_res.data:
                 change = np.random.uniform(-0.01, 0.02)
-                current_pl += (t['price'] * t['quantity'] * change)
                 if change >= 0.01 or change <= -0.005:
                     supabase.table("trades").update({"status": "CLOSED"}).eq("id", t['id']).execute()
                     st.session_state.balance += (t['price'] * t['quantity'] * (1 + change))
-            
-            st.metric("TOTAL P/L", f"${current_pl:,.2f}", delta=f"{current_pl:,.2f}")
-        except: st.metric("TOTAL P/L", "$0.00")
+        except:
+            open_count = 0
 
-        st.metric("CURRENT WALLET", f"${st.session_state.balance:,.2f}")
+        st.metric("WALLET", f"${st.session_state.balance:,.2f}")
         st.metric("ACTIVE SLOTS", f"{open_count} / 4")
+        st.session_state.auto_pilot = st.toggle("🤖 CLASSROOM AUTOPILOT", value=st.session_state.auto_pilot)
         
-        if st.button("🔄 RESET SYSTEM"): 
-            st.session_state.balance = 100.0
-            st.rerun()
-            
-        st.markdown("---")
-        st.session_state.auto_pilot = st.toggle("🤖 CLASSROOM AUTOPILOT")
+        # Navigation
         sel_runner = st.radio("Momentum:", RUNNERS)
         sel_lib = st.selectbox("Library Search:", ["None"] + STOCK_LIBRARY)
         active_ticker = sel_lib if sel_lib != "None" else sel_runner
@@ -125,47 +153,53 @@ else:
             st.session_state.logged_in = False
             st.rerun()
 
-    # --- 7. THE ROLLING SCANNER ---
+    # --- 8. THE ENGINE ---
     @st.fragment(run_every=5)
-    def global_execution_engine(ticker_view):
-        now_toronto = datetime.now(toronto_tz)
-        c1, c2 = st.columns([3, 1])
-        c1.title(f"📊 {ticker_view} Terminal")
-        c2.metric("TORONTO (EDT)", now_toronto.strftime("%I:%M:%S %p"))
-
-        # Main HUD Chart
+    def engine(ticker_view):
+        now = datetime.now(toronto_tz)
+        st.title(f"📊 {ticker_view} | {'LIVE' if is_live else 'SIMULATION'}")
+        
+        # Chart Scaling for Penny vs Big Stocks
+        p_range = (1, 10) if ticker_view in ["DNUT", "VNCE", "CGTX", "IH", "LUMN"] else (100, 500)
         df_ui = pd.DataFrame({
-            'Date': pd.date_range(end=now_toronto, periods=50, freq='min'),
-            'open': np.random.uniform(150, 160, 50), 'high': np.random.uniform(160, 165, 50),
-            'low': np.random.uniform(145, 150, 50), 'close': np.random.uniform(150, 160, 50)
+            'Date': pd.date_range(end=now, periods=50, freq='min'),
+            'open': np.random.uniform(p_range[0], p_range[1], 50),
+            'high': np.random.uniform(p_range[0], p_range[1]+5, 50),
+            'low': np.random.uniform(p_range[0]-5, p_range[1], 50),
+            'close': np.random.uniform(p_range[0], p_range[1], 50)
         })
         
-        # 🤖 ROLLING SCANNER (Budget-Aware)
-        if st.session_state.auto_pilot and open_count < 4:
-            budget_per_slot = st.session_state.balance * (st.session_state.risk_per_trade / 100)
-            potential_trades = []
-            
-            for asset in ALL_ASSETS:
-                sig, px, score = calculate_marcus_signals(pd.DataFrame({'close': np.random.uniform(1, 500, 25)}))
-                if "ULTRA" in sig and budget_per_slot > 0:
-                    potential_trades.append({'ticker': asset, 'sig': sig, 'px': px, 'score': score, 'qty': budget_per_slot / px})
-            
-            top_trades = sorted(potential_trades, key=lambda x: x['score'], reverse=True)
-            for t in top_trades[:(4 - open_count)]:
-                log_trade(t['ticker'], t['sig'], t['px'], t['qty'])
-                st.session_state.balance -= (t['px'] * t['qty'])
+        # AUTO-TRADING ENGINE
+        if st.session_state.auto_pilot:
+            if is_live and open_count < 4:
+                budget = st.session_state.balance * (st.session_state.risk_per_trade / 100)
+                potential = []
+                for asset in ALL_ASSETS:
+                    asset_range = (1, 15) if asset in ["DNUT", "VNCE", "CGTX", "IH", "LUMN"] else (100, 1000)
+                    sig, px, score = calculate_marcus_signals(pd.DataFrame({'close': np.random.uniform(asset_range[0], asset_range[1], 25)}), asset_range)
+                    if "ULTRA" in sig:
+                        potential.append({'ticker': asset, 'sig': sig, 'px': px, 'score': score, 'qty': budget / px})
+                
+                # Execute Top High-Conviction Trades
+                top = sorted(potential, key=lambda x: x['score'], reverse=True)
+                for t in top[:(4 - open_count)]:
+                    log_trade(t['ticker'], t['sig'], t['px'], t['qty'])
+                    st.session_state.balance -= (t['px'] * t['qty'])
+            elif not is_live:
+                st.warning(f"Standby Mode: Market is {market_label}. Active hunt begins Monday 9:30 AM.")
 
+        # Main Visualization
         fig = go.Figure(data=[go.Candlestick(x=df_ui['Date'], open=df_ui['open'], high=df_ui['high'], low=df_ui['low'], close=df_ui['close'])])
         fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,b=0,t=0), xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("---")
         h1, h2, h3 = st.columns(3)
-        ui_sig, ui_px, _ = calculate_marcus_signals(df_ui)
+        ui_sig, ui_px, _ = calculate_marcus_signals(df_ui, p_range)
         h1.metric("Live Price", f"${ui_px:,.2f}")
         h2.metric("AI Signal", ui_sig)
         if h3.button(f"📝 MANUAL LOG: {ticker_view}"):
             qty = (st.session_state.balance * (st.session_state.risk_per_trade / 100)) / ui_px
             log_trade(ticker_view, "MANUAL", ui_px, qty)
 
-    global_execution_engine(active_ticker)
+    engine(active_ticker)
