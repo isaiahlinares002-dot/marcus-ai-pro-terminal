@@ -6,16 +6,15 @@ from datetime import datetime, time
 import pytz
 from supabase import create_client, Client
 
-# --- 1. CONFIG & SYSTEM KEYS ---
-st.set_page_config(page_title="MARCUS ELITE V6.7", layout="wide")
+# --- 1. SYSTEM CONFIG & TIMEZONE ---
+st.set_page_config(page_title="MARCUS ELITE V7.1", layout="wide")
 toronto_tz = pytz.timezone('America/Toronto')
 
-# Database Credentials
 SUPABASE_URL = "https://xhxzhnzwvxmycdskjarr.supabase.co"
 SUPABASE_KEY = "sb_publishable_EpR9PlXgtAapPdOjOqUZow_2BqBuOWo"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- 2. ASSET LIBRARY (Big Tech + Small-Caps Under $100) ---
+# --- 2. ASSET LIBRARY (Big Tech & Penny Stocks) ---
 RUNNERS = ["NVDA", "TSLA", "AAPL", "BTC-USD", "ETH-USD"]
 STOCK_LIBRARY = sorted([
     "GOOGL", "MSFT", "AMZN", "META", "NFLX", "AMD", "INTC", "PYPL", "SQ", "SHOP",
@@ -29,35 +28,12 @@ STOCK_LIBRARY = sorted([
 ])
 ALL_ASSETS = list(set(RUNNERS + STOCK_LIBRARY))
 
-# --- 3. MARKET STATUS LOGIC (Toronto/NY Time) ---
-def check_market_status():
-    now = datetime.now(toronto_tz)
-    # 2026 Holidays (Closed)
-    holidays_2026 = ["2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25"]
-    current_date = now.strftime("%Y-%m-%d")
-    is_weekend = now.weekday() >= 5 
-    is_holiday = current_date in holidays_2026
-    
-    market_open = time(9, 30)
-    market_close = time(16, 0)
-    current_time = now.time()
-    
-    is_within_hours = market_open <= current_time <= market_close
-    
-    if is_weekend or is_holiday:
-        return "🔴 CLOSED (Weekend/Holiday)", False
-    elif not is_within_hours:
-        return "🌙 CLOSED (After Hours)", False
-    else:
-        return "🟢 LIVE MARKET OPEN", True
-
-# --- 4. THE ULTRA MATH ENGINE ---
-def calculate_marcus_signals(df, price_range=(100, 500)):
-    # Simulates realistic last price based on the stock's typical range
+# --- 3. THE BRAINS: ADVANCED EMA SLOPE MATH ---
+def calculate_marcus_signals(df, price_range):
     last_price = np.random.uniform(price_range[0], price_range[1])
     if len(df) < 21: return "🟡 WAIT", last_price, 0
     
-    # EMA 9/21 Crossover Logic
+    # Advanced 9/21 EMA Strategy
     df['EMA9'] = df['close'].ewm(span=9, adjust=False).mean()
     df['EMA21'] = df['close'].ewm(span=21, adjust=False).mean()
     df['slope'] = df['EMA9'].diff()
@@ -72,134 +48,134 @@ def calculate_marcus_signals(df, price_range=(100, 500)):
         return "🔴 ULTRA SELL", last_price, abs(last_slope)
     return "🟡 NEUTRAL", last_price, 0
 
+# --- 4. THE AUTO-EXIT & QUANTITY LOGIC ---
+def close_all_active_positions():
+    try:
+        res = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "OPEN").execute()
+        if res.data:
+            recouped = 0
+            for t in res.data:
+                # 0.2% variance for slippage during panic exit
+                val = t['price'] * t['quantity'] * np.random.uniform(0.998, 1.002)
+                recouped += val
+                supabase.table("trades").update({"status": "CLOSED"}).eq("id", t['id']).execute()
+            st.session_state.balance += recouped
+            st.toast(f"🚨 EMERGENCY EXIT: Recouped ${recouped:.2f}")
+    except: pass
+
 def log_trade(ticker, side, price, qty):
+    clean_qty = round(float(qty), 4) # FIX: No more 0.000 units
+    if clean_qty <= 0: return
     try:
         supabase.table("trades").insert({
-            "username": st.session_state.username,
-            "ticker": ticker,
-            "side": side,
-            "price": float(price),
-            "quantity": float(qty),
-            "cost": float(price * qty),
-            "created_at": datetime.now(toronto_tz).isoformat(),
-            "status": "OPEN"
+            "username": st.session_state.username, "ticker": ticker, "side": side,
+            "price": float(price), "quantity": clean_qty, "cost": float(price * clean_qty),
+            "created_at": datetime.now(toronto_tz).isoformat(), "status": "OPEN"
         }).execute()
-        st.toast(f"✅ AUTO-ENTRY: {ticker} ({qty:.3f} units)")
-    except:
-        st.error("Trade Log Error")
+        st.toast(f"✅ AUTO-LOG: {ticker} ({side})")
+    except: pass
 
-# --- 5. SESSION STATE ---
+# --- 5. SYSTEM STATE ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'balance' not in st.session_state: st.session_state.balance = 100.0
-if 'risk_per_trade' not in st.session_state: st.session_state.risk_per_trade = 25
-if 'auto_pilot' not in st.session_state: st.session_state.auto_pilot = False
+if 'balance' not in st.session_state: st.session_state.balance = 113.0
+if 'start_balance' not in st.session_state: st.session_state.start_balance = 113.0
 
-# --- 6. AUTHENTICATION (Full Tabs) ---
+# --- 6. AUTHENTICATION TABS ---
 if not st.session_state.logged_in:
     st.title("🚀 Marcus Elite Terminal")
-    tab1, tab2 = st.tabs(["Login", "Sign Up"])
-    with tab1:
-        u = st.text_input("User ID")
-        p = st.text_input("Password", type="password")
-        if st.button("Access Terminal"):
+    t1, t2 = st.tabs(["Login", "Sign Up"])
+    with t1:
+        u, p = st.text_input("User ID"), st.text_input("Password", type="password")
+        if st.button("Access Hub"):
             res = supabase.table("users").select("*").eq("username", u).eq("password", p).execute()
-            if res.data:
-                st.session_state.logged_in, st.session_state.username = True, u
-                st.rerun()
-            else: st.error("Invalid Credentials")
-    with tab2:
-        new_u = st.text_input("Create User ID")
-        new_p = st.text_input("Create Password", type="password")
-        if st.button("Register Elite Account"):
-            try:
-                supabase.table("users").insert({"username": new_u, "password": new_p}).execute()
-                st.success("Account Created! Use the Login tab.")
-            except: st.error("Username taken.")
-else:
-    # --- 7. SIDEBAR (Full UI & Risk HUD) ---
-    market_label, is_live = check_market_status()
-    with st.sidebar:
-        st.header(f"Elite: {st.session_state.username}")
-        st.subheader(f"Status: {market_label}")
-        
-        # Risk Management for Small Accounts
-        st.session_state.balance = st.number_input("Wallet ($)", value=float(st.session_state.balance))
-        st.session_state.risk_per_trade = st.slider("Risk Per Trade (%)", 5, 100, 25)
-        
-        # P/L & Slot Management
-        try:
-            trade_res = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "OPEN").execute()
-            open_count = len(trade_res.data)
-            
-            # Simulated Exit Strategy
-            for t in trade_res.data:
-                change = np.random.uniform(-0.01, 0.02)
-                if change >= 0.01 or change <= -0.005:
-                    supabase.table("trades").update({"status": "CLOSED"}).eq("id", t['id']).execute()
-                    st.session_state.balance += (t['price'] * t['quantity'] * (1 + change))
-        except:
-            open_count = 0
+            if res.data: st.session_state.logged_in, st.session_state.username = True, u; st.rerun()
+    with t2:
+        nu, npw = st.text_input("New ID"), st.text_input("New Pass", type="password")
+        if st.button("Create Elite Account"): 
+            supabase.table("users").insert({"username": nu, "password": npw}).execute(); st.success("Created!")
 
-        st.metric("WALLET", f"${st.session_state.balance:,.2f}")
+else:
+    # --- 7. SIDEBAR HUD & "CLUTTER" UI ---
+    now = datetime.now(toronto_tz)
+    is_live = time(9, 30) <= now.time() <= time(16, 0) and now.weekday() < 5
+    
+    with st.sidebar:
+        st.header(f"Operator: {st.session_state.username}")
+        st.markdown(f"**System Time:** {now.strftime('%I:%M:%S %p')}")
+        
+        # P/L Visual Tracker
+        session_pl = st.session_state.balance - st.session_state.start_balance
+        pl_color = "green" if session_pl >= 0 else "red"
+        st.markdown(f"### Performance: :{pl_color}[${session_pl:,.2f}]")
+        
+        st.markdown("---")
+        st.session_state.balance = st.number_input("Vault Balance ($)", value=float(st.session_state.balance))
+        st.session_state.risk_per_trade = st.slider("Risk Per Slot (%)", 5, 100, 25)
+        
+        # Slot Status
+        try:
+            active_data = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "OPEN").execute()
+            open_count = len(active_data.data)
+        except: open_count = 0
+            
+        st.metric("WALLET", f"${st.session_state.balance:,.2f}", f"{session_pl:,.2f}")
         st.metric("ACTIVE SLOTS", f"{open_count} / 4")
-        st.session_state.auto_pilot = st.toggle("🤖 CLASSROOM AUTOPILOT", value=st.session_state.auto_pilot)
         
-        # Navigation
-        sel_runner = st.radio("Momentum:", RUNNERS)
-        sel_lib = st.selectbox("Library Search:", ["None"] + STOCK_LIBRARY)
-        active_ticker = sel_lib if sel_lib != "None" else sel_runner
-        
-        if st.button("Logout"):
-            st.session_state.logged_in = False
+        # UI Control: The Switch
+        autopilot_active = st.toggle("🤖 CLASSROOM AUTOPILOT", value=True)
+        if not autopilot_active and open_count > 0:
+            close_all_active_positions()
             st.rerun()
 
-    # --- 8. THE ENGINE ---
+        st.markdown("---")
+        active_ticker = st.selectbox("Market Feed:", ALL_ASSETS)
+        if st.button("Secure Logout"): st.session_state.logged_in = False; st.rerun()
+
+    # --- 8. THE PRO ENGINE & CANDLESTICK UI ---
     @st.fragment(run_every=5)
     def engine(ticker_view):
-        now = datetime.now(toronto_tz)
-        st.title(f"📊 {ticker_view} | {'LIVE' if is_live else 'SIMULATION'}")
-        
-        # Chart Scaling for Penny vs Big Stocks
-        p_range = (1, 10) if ticker_view in ["DNUT", "VNCE", "CGTX", "IH", "LUMN"] else (100, 500)
-        df_ui = pd.DataFrame({
-            'Date': pd.date_range(end=now, periods=50, freq='min'),
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            st.title(f"📊 {ticker_view} | {'LIVE FEED' if is_live else 'SIMULATION'}")
+        with c2:
+            st.metric("MARKET STATUS", "OPEN" if is_live else "CLOSED")
+
+        # Pro Chart Data Scaling
+        p_range = (1, 15) if ticker_view in ["DNUT", "VNCE", "CGTX", "IH", "LUMN"] else (100, 500)
+        df = pd.DataFrame({
+            'date': pd.date_range(end=datetime.now(), periods=50, freq='min'),
             'open': np.random.uniform(p_range[0], p_range[1], 50),
-            'high': np.random.uniform(p_range[0], p_range[1]+5, 50),
-            'low': np.random.uniform(p_range[0]-5, p_range[1], 50),
+            'high': np.random.uniform(p_range[0]+2, p_range[1]+5, 50),
+            'low': np.random.uniform(p_range[0]-5, p_range[1]-2, 50),
             'close': np.random.uniform(p_range[0], p_range[1], 50)
         })
         
-        # AUTO-TRADING ENGINE
-        if st.session_state.auto_pilot:
-            if is_live and open_count < 4:
+        # AUTO-TRADING MATH
+        if autopilot_active and is_live:
+            db_check = len(supabase.table("trades").select("id").eq("username", st.session_state.username).eq("status", "OPEN").execute().data)
+            if db_check < 4:
                 budget = st.session_state.balance * (st.session_state.risk_per_trade / 100)
-                potential = []
-                for asset in ALL_ASSETS:
-                    asset_range = (1, 15) if asset in ["DNUT", "VNCE", "CGTX", "IH", "LUMN"] else (100, 1000)
-                    sig, px, score = calculate_marcus_signals(pd.DataFrame({'close': np.random.uniform(asset_range[0], asset_range[1], 25)}), asset_range)
-                    if "ULTRA" in sig:
-                        potential.append({'ticker': asset, 'sig': sig, 'px': px, 'score': score, 'qty': budget / px})
-                
-                # Execute Top High-Conviction Trades
-                top = sorted(potential, key=lambda x: x['score'], reverse=True)
-                for t in top[:(4 - open_count)]:
-                    log_trade(t['ticker'], t['sig'], t['px'], t['qty'])
-                    st.session_state.balance -= (t['px'] * t['qty'])
-            elif not is_live:
-                st.warning(f"Standby Mode: Market is {market_label}. Active hunt begins Monday 9:30 AM.")
+                sig, px, score = calculate_marcus_signals(df, p_range)
+                if "ULTRA" in sig:
+                    log_trade(ticker_view, "BUY", px, budget/px)
+                    st.session_state.balance -= budget
 
-        # Main Visualization
-        fig = go.Figure(data=[go.Candlestick(x=df_ui['Date'], open=df_ui['open'], high=df_ui['high'], low=df_ui['low'], close=df_ui['close'])])
-        fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,b=0,t=0), xaxis_rangeslider_visible=False)
+        # PROFESSIONAL CANDLESTICK VISUALS
+        fig = go.Figure(data=[go.Candlestick(
+            x=df['date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'],
+            increasing_line_color='#00ff00', decreasing_line_color='#ff0000'
+        )])
+        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=0,r=0,b=0,t=0), xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
 
+        # ENGINE HUD
         st.markdown("---")
-        h1, h2, h3 = st.columns(3)
-        ui_sig, ui_px, _ = calculate_marcus_signals(df_ui, p_range)
-        h1.metric("Live Price", f"${ui_px:,.2f}")
-        h2.metric("AI Signal", ui_sig)
-        if h3.button(f"📝 MANUAL LOG: {ticker_view}"):
-            qty = (st.session_state.balance * (st.session_state.risk_per_trade / 100)) / ui_px
-            log_trade(ticker_view, "MANUAL", ui_px, qty)
+        h1, h2, h3, h4 = st.columns(4)
+        sig_val, px_val, slope_val = calculate_marcus_signals(df, p_range)
+        h1.metric("Current Price", f"${px_val:,.2f}")
+        h2.metric("AI Signal", sig_val)
+        h3.metric("EMA Slope", f"{slope_val:.4f}")
+        if h4.button(f"FORCE LOG: {ticker_view}"):
+            log_trade(ticker_view, "MANUAL", px_val, (st.session_state.balance * 0.25)/px_val)
 
     engine(active_ticker)
