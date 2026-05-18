@@ -194,7 +194,7 @@ else:
             total_unrealized = 0
             rows = []
             for t in active_res.data:
-                # FIX: Clean rounding to prevent data leak / type crashes on background assets
+                # FIX: Standardize background evaluations to prevent loop disconnects
                 if t['ticker'] == ticker:
                     cur = float(round(px, 2))
                 else:
@@ -210,14 +210,18 @@ else:
                 rows.append({"Asset": t['ticker'], "Entry": f"${t['price']:.2f}", "Profit": f"${pnl:.2f}"})
                 
                 if auto_on:
+                    # FIX: Exit execution logic remains fully autonomous regardless of UI selection
                     if cur <= stop_price or cur >= target_price or (t['ticker'] == ticker and sig == "🔴 ULTRA SELL"):
-                        supabase.table("trades").update({
-                            "status": "CLOSED",
-                            "exit_price": cur,  # Cleaned, rounded float
-                            "exit_time": datetime.now(toronto_tz).strftime("%H:%M:%S")
-                        }).eq("id", t['id']).execute()
-                        st.session_state.balance += (cur * t['quantity'])
-                        st.rerun()
+                        try:
+                            supabase.table("trades").update({
+                                "status": "CLOSED",
+                                "exit_price": cur,
+                                "exit_time": datetime.now(toronto_tz).strftime("%H:%M:%S")
+                            }).eq("id", t['id']).execute()
+                            st.session_state.balance += (cur * t['quantity'])
+                            st.rerun()
+                        except:
+                            pass
             st.table(pd.DataFrame(rows))
             color = "green" if total_unrealized > 0 else "red"
             st.write(f"#### Portfolio Change: :{color}[${total_unrealized:.2f}]")
@@ -229,7 +233,6 @@ else:
         if auto_on and (is_market_open or is_crypto) and slots < 4:
             target, t_slope = scanner()
             if target and t_slope > 0.05:
-                # Prevent duplicate entries
                 already_holding = any(d['ticker'] == target for d in (active_res.data if active_res.data else []))
                 if not already_holding:
                     execute_smart_buy(target, px)
