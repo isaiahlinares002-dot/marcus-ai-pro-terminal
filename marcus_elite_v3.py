@@ -171,6 +171,9 @@ else:
         if st.button("LOGOUT"): st.session_state.logged_in = False; st.rerun()
 
     # --- 6. THE DASHBOARD ---
+    # FIX: Selectbox is defined cleanly out here with a stable unique key tracking state
+    selected_ticker = st.selectbox("Focus Asset", STOCK_LIBRARY, key="focus_asset_selector")
+
     @st.fragment(run_every=5)
     def live_engine(ticker):
         df = pd.DataFrame({
@@ -188,11 +191,10 @@ else:
             total_unrealized = 0
             rows = []
             for t in active_res.data:
-                # Standardize background evaluations to prevent loop disconnects
+                # Background evaluation logic
                 if t['ticker'] == ticker:
                     cur = float(round(px, 2))
                 else:
-                    # Broadened background movement slightly to fix live session stalemates
                     cur = float(round(t['price'] * np.random.uniform(0.95, 1.05), 2)) 
                 
                 pnl = (cur - t['price']) * t['quantity']
@@ -205,7 +207,6 @@ else:
                 rows.append({"Asset": t['ticker'], "Entry": f"${t['price']:.2f}", "Profit": f"${pnl:.2f}"})
                 
                 if auto_on:
-                    # Boundary checks so high-volatility live moves trigger exits properly
                     if cur <= stop_price or cur >= target_price or (t['ticker'] == ticker and sig == "🔴 ULTRA SELL"):
                         try:
                             supabase.table("trades").update({
@@ -246,5 +247,5 @@ else:
                 st.dataframe(closed_df[['ticker', 'price', 'exit_price', 'date']], use_container_width=True)
         except: pass
 
-    live_engine(st.selectbox("Focus Asset", STOCK_LIBRARY))
-    live_engine(st.selectbox("Focus Asset", STOCK_LIBRARY))
+    # Execute the layout with the clean outside ticker string
+    live_engine(selected_ticker)
