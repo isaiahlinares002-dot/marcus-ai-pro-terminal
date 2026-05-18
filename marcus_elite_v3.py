@@ -194,14 +194,18 @@ else:
             total_unrealized = 0
             rows = []
             for t in active_res.data:
-                # Mimics live stock price fluctuation
-                cur = px if t['ticker'] == ticker else t['price'] * np.random.uniform(0.99, 1.01)
+                # FIX: Clean rounding to prevent data leak / type crashes on background assets
+                if t['ticker'] == ticker:
+                    cur = float(round(px, 2))
+                else:
+                    cur = float(round(t['price'] * np.random.uniform(0.99, 1.01), 2))
+                
                 pnl = (cur - t['price']) * t['quantity']
                 total_unrealized += pnl
                 
                 # Dynamic Exits (Trailing Stop + Profit Target)
-                stop_price = t['price'] * 0.985
-                target_price = t['price'] * (1 + st.session_state.target_profit / 100)
+                stop_price = round(t['price'] * 0.985, 2)
+                target_price = round(t['price'] * (1 + st.session_state.target_profit / 100), 2)
                 
                 rows.append({"Asset": t['ticker'], "Entry": f"${t['price']:.2f}", "Profit": f"${pnl:.2f}"})
                 
@@ -209,7 +213,7 @@ else:
                     if cur <= stop_price or cur >= target_price or (t['ticker'] == ticker and sig == "🔴 ULTRA SELL"):
                         supabase.table("trades").update({
                             "status": "CLOSED",
-                            "exit_price": cur,
+                            "exit_price": cur,  # Cleaned, rounded float
                             "exit_time": datetime.now(toronto_tz).strftime("%H:%M:%S")
                         }).eq("id", t['id']).execute()
                         st.session_state.balance += (cur * t['quantity'])
