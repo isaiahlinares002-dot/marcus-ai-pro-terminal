@@ -56,7 +56,6 @@ def scanner():
 def execute_smart_buy(ticker, price):
     """Sends trade to Supabase with Smart Scaling to protect balance"""
     try:
-        # Smart Scaling (Reduce risk if balance dips below $100)
         risk_mod = 1.0 if st.session_state.balance >= 100 else 0.5
         risk_amount = st.session_state.balance * (st.session_state.risk_percent / 100) * risk_mod
         
@@ -99,8 +98,6 @@ if 'session_profit' not in st.session_state: st.session_state.session_profit = 0
 
 if not st.session_state.logged_in:
     st.title("🚀 Marcus Elite Terminal")
-    
-    # Toggle between Sign In and Sign Up modes
     auth_mode = st.radio("Choose Action", ["Sign In", "Sign Up/Register"], horizontal=True)
     
     if auth_mode == "Sign In":
@@ -133,12 +130,10 @@ if not st.session_state.logged_in:
                 st.error("Passwords do not match.")
             else:
                 try:
-                    # Check if user already exists
                     check_user = supabase.table("users").select("*").eq("username", new_u).execute()
                     if check_user.data:
                         st.error("This User ID is already taken. Choose another.")
                     else:
-                        # Insert new credentials into users table
                         user_payload = {"username": new_u, "password": new_p}
                         supabase.table("users").insert(user_payload).execute()
                         st.success("🎉 Registration Successful! Please switch to 'Sign In' to log in.")
@@ -178,7 +173,6 @@ else:
     # --- 6. THE DASHBOARD ---
     @st.fragment(run_every=5)
     def live_engine(ticker):
-        # Generate Simulated OHLC Data
         df = pd.DataFrame({
             'date': pd.date_range(end=datetime.now(), periods=50, freq='min'),
             'open': np.random.uniform(100, 500, 50), 
@@ -194,23 +188,24 @@ else:
             total_unrealized = 0
             rows = []
             for t in active_res.data:
-                # FIX: Standardize background evaluations to prevent loop disconnects
+                # Standardize background evaluations to prevent loop disconnects
                 if t['ticker'] == ticker:
                     cur = float(round(px, 2))
                 else:
-                    cur = float(round(t['price'] * np.random.uniform(0.99, 1.01), 2))
+                    # Broadened background movement slightly to fix live session stalemates
+                    cur = float(round(t['price'] * np.random.uniform(0.95, 1.05), 2)) 
                 
                 pnl = (cur - t['price']) * t['quantity']
                 total_unrealized += pnl
                 
-                # Dynamic Exits (Trailing Stop + Profit Target)
+                # Dynamic Exits (Boundary checks)
                 stop_price = round(t['price'] * 0.985, 2)
                 target_price = round(t['price'] * (1 + st.session_state.target_profit / 100), 2)
                 
                 rows.append({"Asset": t['ticker'], "Entry": f"${t['price']:.2f}", "Profit": f"${pnl:.2f}"})
                 
                 if auto_on:
-                    # FIX: Exit execution logic remains fully autonomous regardless of UI selection
+                    # Boundary checks so high-volatility live moves trigger exits properly
                     if cur <= stop_price or cur >= target_price or (t['ticker'] == ticker and sig == "🔴 ULTRA SELL"):
                         try:
                             supabase.table("trades").update({
@@ -251,4 +246,5 @@ else:
                 st.dataframe(closed_df[['ticker', 'price', 'exit_price', 'date']], use_container_width=True)
         except: pass
 
+    live_engine(st.selectbox("Focus Asset", STOCK_LIBRARY))
     live_engine(st.selectbox("Focus Asset", STOCK_LIBRARY))
