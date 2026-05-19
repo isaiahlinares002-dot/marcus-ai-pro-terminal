@@ -85,11 +85,11 @@ def emergency_sell_all():
         for t in active.data:
             supabase.table("trades").update({
                 "status": "CLOSED",
-                "exit_price": t['price'],  # Safely match entry price for mock liquidation break-even
+                "exit_price": t['price'],
                 "exit_time": datetime.now(toronto_tz).strftime("%H:%M:%S")
             }).eq("id", t['id']).execute()
             st.session_state.balance += (t['price'] * t['quantity'])
-        st.success("🚨 PORTFOLIO LIQUIDATED.")
+        st.toast("🚨 PORTFOLIO LIQUIDATED IN DATABASE.")
     except Exception as e:
         st.error(f"Liquidation Failed: {e}")
 
@@ -145,37 +145,32 @@ else:
     now = datetime.now(toronto_tz)
     is_market_open = time(9,30) <= now.time() <= time(16,0) and now.weekday() < 5
     
+    # Pre-fetch dynamic win rate for HUD
+    try:
+        history = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "CLOSED").execute()
+        total_closed = len(history.data)
+        wins = len([x for x in history.data if x.get('exit_price', 0) > x['price']])
+        win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
+    except:
+        total_closed, win_rate = 0, 0
+
     with st.sidebar:
         st.header(f"Operator: {st.session_state.username}")
         st.metric("CASH", f"${st.session_state.balance:.2f}", delta=f"{st.session_state.balance - 113:.2f}")
         
-        # Win-Rate Tracker HUD
-        try:
-            history = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "CLOSED").execute()
-            total_closed = len(history.data)
-            wins = len([x for x in history.data if x.get('exit_price', 0) > x['price']])
-            win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
-            st.write(f"🏆 **Win Rate:** {win_rate:.1f}%")
-            st.caption(f"Total Trades: {total_closed}")
-        except: pass
+        st.write(f"🏆 **Win Rate:** {win_rate:.1f}%")
+        st.caption(f"Total Trades: {total_closed}")
 
         # CONTROLS
         st.session_state.risk_percent = st.slider("Trade Power %", 5, 100, 25)
         st.session_state.target_profit = st.slider("Take Profit %", 0.5, 5.0, 1.5)
         
-        try:
-            active_res = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "OPEN").execute()
-            slots = len(active_res.data)
-        except: slots, active_res = 0, None
-        
-        st.metric("ACTIVE SLOTS", f"{slots} / 4")
         auto_on = st.toggle("🤖 AUTOPILOT", value=True)
         
-        # FIX: Manual overwrite logic to clear slots out on command
-        if slots > 0:
-            if st.button("🚨 MANUALLY CLOSE ALL TRADES", use_container_width=True):
-                emergency_sell_all()
-                st.rerun()
+        # Manual liquidation button
+        if st.button("🚨 MANUALLY CLOSE ALL TRADES", use_container_width=True):
+            emergency_sell_all()
+            st.rerun()
                 
         if st.button("LOGOUT"): st.session_state.logged_in = False; st.rerun()
 
@@ -184,6 +179,13 @@ else:
 
     @st.fragment(run_every=5)
     def live_engine(ticker):
+        # FIX: Always fetch a real-time snapshot of active database items directly inside the fragment loop
+        try:
+            active_res = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "OPEN").execute()
+            slots = len(active_res.data)
+        except:
+            slots, active_res = 0, None
+
         df = pd.DataFrame({
             'date': pd.date_range(end=datetime.now(), periods=50, freq='min'),
             'open': np.random.uniform(100, 500, 50), 
@@ -194,6 +196,7 @@ else:
         sig, px, slp = get_signals(df)
 
         st.markdown(f"### 📡 Monitoring: {ticker}")
+        st.write(f"**Active Positions:** {slots} / 4")
         
         if slots > 0:
             total_unrealized = 0
@@ -207,7 +210,6 @@ else:
                 pnl = (cur - t['price']) * t['quantity']
                 total_unrealized += pnl
                 
-                # Dynamic Exits (Boundary checks)
                 stop_price = round(t['price'] * 0.985, 2)
                 target_price = round(t['price'] * (1 + st.session_state.target_profit / 100), 2)
                 
