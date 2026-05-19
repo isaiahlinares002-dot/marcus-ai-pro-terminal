@@ -6,7 +6,6 @@ from datetime import datetime, timedelta, time
 import pytz
 from supabase import create_client
 from alpaca_trade_api.rest import REST
-from alpaca_trade_api import TimeFrame
 
 # --- 1. INITIAL SETUP & APP CONFIG ---
 st.set_page_config(page_title="Marcus Elite Master Terminal v7", layout="wide")
@@ -72,9 +71,10 @@ def fetch_real_data(api, ticker):
         end_dt = datetime.now(toronto_tz)
         start_dt = end_dt - timedelta(hours=3)
         
+        # 🔄 Using native string literal '1Min' to bypass legacy namespace issues on Python 3.14
         bars = api.get_bars(
             alpaca_ticker, 
-            TimeFrame.Minute, 
+            '1Min', 
             start=start_dt.isoformat(), 
             end=end_dt.isoformat(), 
             adjustment='raw'
