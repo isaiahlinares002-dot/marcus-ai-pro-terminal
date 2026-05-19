@@ -1,6 +1,8 @@
-streamlit
+streamlit==1.57.0
 pandas
 numpy
 plotly
 supabase
+urllib3>=2.0.0
+six
 alpaca-trade-api
