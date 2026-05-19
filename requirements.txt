@@ -1,6 +1,6 @@
 streamlit
 pandas
-yfinance
-supabase
-streamlit-autorefresh
+numpy
 plotly
+supabase
+alpaca-trade-api
