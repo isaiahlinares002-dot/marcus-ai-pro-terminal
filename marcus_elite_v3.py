@@ -85,11 +85,13 @@ def emergency_sell_all():
         for t in active.data:
             supabase.table("trades").update({
                 "status": "CLOSED",
+                "exit_price": t['price'],  # Safely match entry price for mock liquidation break-even
                 "exit_time": datetime.now(toronto_tz).strftime("%H:%M:%S")
             }).eq("id", t['id']).execute()
             st.session_state.balance += (t['price'] * t['quantity'])
         st.success("🚨 PORTFOLIO LIQUIDATED.")
-    except: pass
+    except Exception as e:
+        st.error(f"Liquidation Failed: {e}")
 
 # --- 5. APP CORE & AUTHENTICATION FLOW ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
@@ -168,10 +170,16 @@ else:
         
         st.metric("ACTIVE SLOTS", f"{slots} / 4")
         auto_on = st.toggle("🤖 AUTOPILOT", value=True)
+        
+        # FIX: Manual overwrite logic to clear slots out on command
+        if slots > 0:
+            if st.button("🚨 MANUALLY CLOSE ALL TRADES", use_container_width=True):
+                emergency_sell_all()
+                st.rerun()
+                
         if st.button("LOGOUT"): st.session_state.logged_in = False; st.rerun()
 
     # --- 6. THE DASHBOARD ---
-    # FIX: Selectbox is defined cleanly out here with a stable unique key tracking state
     selected_ticker = st.selectbox("Focus Asset", STOCK_LIBRARY, key="focus_asset_selector")
 
     @st.fragment(run_every=5)
@@ -191,7 +199,6 @@ else:
             total_unrealized = 0
             rows = []
             for t in active_res.data:
-                # Background evaluation logic
                 if t['ticker'] == ticker:
                     cur = float(round(px, 2))
                 else:
@@ -247,5 +254,4 @@ else:
                 st.dataframe(closed_df[['ticker', 'price', 'exit_price', 'date']], use_container_width=True)
         except: pass
 
-    # Execute the layout with the clean outside ticker string
     live_engine(selected_ticker)
