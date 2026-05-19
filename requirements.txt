@@ -5,4 +5,5 @@ plotly
 supabase
 urllib3>=2.0.0
 six
+pytz
 alpaca-trade-api
