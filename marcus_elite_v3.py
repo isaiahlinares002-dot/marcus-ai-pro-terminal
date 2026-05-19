@@ -5,7 +5,8 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta, time
 import pytz
 from supabase import create_client
-from alpaca_trade_api.rest import REST, TimeFrame
+from alpaca_trade_api.rest import REST
+from alpaca_trade_api import TimeFrame
 
 # --- 1. INITIAL SETUP & APP CONFIG ---
 st.set_page_config(page_title="Marcus Elite Master Terminal v7", layout="wide")
