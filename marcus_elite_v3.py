@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from datetime import datetime, timedelta, time
+from datetime import datetime, time
 import pytz
 import requests
+import yfinance as yf
 from supabase import create_client
 
 # --- 1. INITIAL SETUP & APP CONFIG ---
@@ -20,7 +21,7 @@ supabase = create_client(URL, KEY)
 PAPER_API_KEY = "PKKJYWAN6ZEDTBPTWHQRV26Q4Y"
 PAPER_SECRET_KEY = "GnsyXG84eJ4C5YEbjdFSdZYC2pyiDb6ZNGDLGnHcYvo9"
 
-# --- ACTIVE LIBRARY TRACKER ---
+# --- ACTIVE LIBRARY TRACKER (MAPPED TO YAHOO TICKER STRINGS) ---
 STOCK_LIBRARY = [
     "ETH-USD", "BTC-USD", "SOL-USD", "AAPL", "TSLA", "NVDA", "PLTR", "COIN", "VNCE", "AMD",
     "MSFT", "GOOGL", "META", "AMZN", "NFLX", "INTC", "PYPL", "SQ", "SHOP", "RIVN"
@@ -53,56 +54,29 @@ def get_signals(df):
         
     return "⚪ SCANNING", last_px, slope
 
-# --- 3. UNIVERSAL DATA INGESTION ENGINE ---
+# --- 3. FREE REAL-TIME DATA ENGINE (YAHOO FINANCE SWAP) ---
 def fetch_real_data(ticker):
-    """Fetches clean json data directly via requests to support both Stocks & Crypto free tiers"""
+    """Fetches clean real-time 1-minute candlestick data instantly without delays"""
     try:
-        if "USD" in ticker:
-            url = "https://data.alpaca.markets/v1beta3/crypto/us/bars"
-            symbol_key = ticker.replace("-", "/")
-            params = {
-                "symbols": symbol_key,
-                "timeframe": "1Min",
-                "start": (datetime.now(toronto_tz) - timedelta(hours=4)).isoformat(),
-                "end": (datetime.now(toronto_tz) - timedelta(minutes=16)).isoformat()
-            }
-        else:
-            url = "https://data.alpaca.markets/v2/stocks/bars"
-            symbol_key = ticker
-            params = {
-                "symbols": symbol_key,
-                "timeframe": "1Min",
-                "start": (datetime.now(toronto_tz) - timedelta(hours=4)).isoformat(),
-                "end": (datetime.now(toronto_tz) - timedelta(minutes=16)).isoformat(),
-                "feed": "iex"
-            }
-            
-        headers = {
-            "Apca-Api-Key-Id": PAPER_API_KEY,
-            "Apca-Api-Secret-Key": PAPER_SECRET_KEY
-        }
+        # yfinance handles tickers natively. It works directly for AAPL, BTC-USD, etc.
+        ticker_obj = yf.Ticker(ticker)
+        # Fetch the last 1 day of 1-minute bars (provides maximum real-time granularity)
+        df_raw = ticker_obj.history(period="1d", interval="1m")
         
-        response = requests.get(url, headers=headers, params=params, timeout=5)
-        if response.status_code != 200:
+        if df_raw.empty:
             return pd.DataFrame()
             
-        data = response.json()
-        bars_raw = data.get("bars", {})
-        
-        symbol_data = bars_raw.get(symbol_key, [])
-        if not symbol_data:
-            return pd.DataFrame()
-            
-        df = pd.DataFrame(symbol_data)
-        df = df.rename(columns={'t': 'date', 'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close'})
-        df['date'] = pd.to_datetime(df['date'])
+        df = df_raw.reset_index()
+        # Handle formatting to keep columns identical to our analytical structure
+        df = df.rename(columns={'Datetime': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close'})
+        df['date'] = pd.to_datetime(df['date']).dt.tz_convert("America/Toronto")
         return df[['date', 'open', 'high', 'low', 'close']]
     except Exception:
         return pd.DataFrame()
 
 # --- 4. AUTOMATED API EXECUTION HANDSHAKES ---
 def alpaca_order(symbol, qty, side):
-    """Submits raw order execution structures directly to Alpaca trading desks"""
+    """Submits raw order execution structures directly to Alpaca paper desks"""
     try:
         url = "https://paper-api.alpaca.markets/v2/orders"
         headers = {
@@ -110,6 +84,7 @@ def alpaca_order(symbol, qty, side):
             "Apca-Api-Secret-Key": PAPER_SECRET_KEY,
             "Content-Type": "application/json"
         }
+        # Alpaca crypto routing expects hyphens replaced with slashes
         payload = {
             "symbol": symbol.replace("-", "/") if "USD" in symbol else symbol,
             "qty": str(qty),
@@ -124,7 +99,6 @@ def alpaca_order(symbol, qty, side):
 def execute_smart_buy(ticker, price, slots_count):
     """Saves executed order configurations safely into the Supabase accounting matrix"""
     try:
-        # Split power dynamically relative to total targeted slot blocks
         power_ratio = 1 / 5 
         risk_amount = st.session_state.balance * (st.session_state.risk_percent / 100) * power_ratio
         
@@ -158,7 +132,7 @@ def emergency_sell_all():
                 "exit_price": t['price'],
                 "exit_time": datetime.now(toronto_tz).strftime("%H:%M:%S")
             }).eq("id", t['id']).execute()
-        st.toast("💰 CASH-OUT SUCESSFUL: All structural assets liquidated cleanly.")
+        st.toast("💰 CASH-OUT SUCCESSFUL: All structural assets liquidated cleanly.")
         st.rerun()
     except Exception as e:
         st.error(f"Liquidation Error: {e}")
@@ -209,7 +183,7 @@ else:
 
     with st.sidebar:
         st.header(f"Operator: {st.session_state.username}")
-        st.markdown("💰 ENVIRONMENT: **AUTONOMOUS PAPER DESK**")
+        st.markdown("💰 ENVIRONMENT: **REAL-TIME SWAP AUTOMATION**")
         
         try:
             url = "https://paper-api.alpaca.markets/v2/account"
@@ -246,10 +220,11 @@ else:
         except: slots, active_res = 0, None
 
         # --- 📈 7. PARALLEL CALCULATION ENGINE & TOP FINDER ---
-        st.markdown("### 📡 Live Calculation Radar (Scanning Entire Library...)")
+        st.markdown("### 📡 Live Calculation Radar (Scanning Entire Library via Free Live Streams)")
         radar_data = []
         valid_buys = []
         
+        # Free Live Stocks run Mon-Fri market hours; Crypto runs 24/7/365
         active_scan_list = STOCK_LIBRARY if is_market_open else ["ETH-USD", "BTC-USD", "SOL-USD"]
         
         for asset in active_scan_list:
@@ -265,7 +240,7 @@ else:
             radar_df = pd.DataFrame(radar_data).sort_values(by="Slope Momentum", ascending=False)
             st.dataframe(radar_df, use_container_width=True)
         else:
-            st.warning("Synchronizing multi-channel arrays...")
+            st.warning("Synchronizing multi-channel real-time arrays...")
 
         # Get data chunk for the selected focal chart view
         df = fetch_real_data(ticker)
@@ -313,11 +288,10 @@ else:
             pnl_color = "green" if total_unrealized >= 0 else "red"
             st.markdown(f"#### Total Unrealized PnL Profile: :{pnl_color}[${total_unrealized:.2f}]")
         else:
-            st.info("Autopilot Active: System searching calculations to populate free tracking tracks...")
+            st.info("Autopilot Active: System searching live calculations to populate free tracks...")
 
         # MULTI-SLOT AUTONOMOUS BUY RULES (Fires automatically on top calculated slots)
         if auto_on and slots < 5 and valid_buys:
-            # Sort the mathematically valid buys by slope momentum strength to pull top setups
             sorted_buys = sorted(valid_buys, key=lambda x: x['slope'], reverse=True)
             
             for potential_buy in sorted_buys:
@@ -329,7 +303,6 @@ else:
                     alpaca_ticker = potential_buy['ticker']
                     px = potential_buy['price']
                     
-                    # Calculate position size split
                     power_ratio = 1 / 5
                     risk_amount = st.session_state.balance * (st.session_state.risk_percent / 100) * power_ratio
                     qty = int(risk_amount / px)
