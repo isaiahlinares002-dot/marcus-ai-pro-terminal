@@ -16,7 +16,7 @@ URL = "https://xhxzhnzwvxmycdskjarr.supabase.co"
 KEY = "sb_publishable_EpR9PlXgtAapPdOjOqUZow_2BqBuOWo"
 supabase = create_client(URL, KEY)
 
-# 🔐 NEW UPDATED SIMULATION ACCESS KEYS APPLIED
+# 🔐 LIVE USER CHIP CERTIFICATES REGISTERED
 PAPER_API_KEY = "PKKJYWAN6ZEDTBPTWHQRV26Q4Y"
 PAPER_SECRET_KEY = "GnsyXG84eJ4C5YEbjdFSdZYC2pyiDb6ZNGDLGnHcYvo9"
 
@@ -70,8 +70,10 @@ def fetch_real_data(api, ticker):
     """Streams live candlestick chunks directly out of Alpaca core data servers"""
     try:
         alpaca_ticker = ticker.replace("-", "/") if "USD" in ticker else ticker
-        end_dt = datetime.now(toronto_tz)
-        start_dt = end_dt - timedelta(hours=2) # Tighter timeline window for faster reactions
+        
+        # ⏱️ Roll back the end timestamp 15 minutes to clear Alpaca's free data subscription constraints
+        end_dt = datetime.now(toronto_tz) - timedelta(minutes=15)
+        start_dt = end_dt - timedelta(hours=3) # Grabbing a wider historical block for stable calculations
         
         bars = api.get_bars(
             alpaca_ticker, 
@@ -217,7 +219,7 @@ else:
         df = fetch_real_data(alpaca_api, ticker)
         sig, px, slp = get_signals(df)
 
-        st.markdown(f"### 📡 Monitoring Interface: {ticker} (Real-Time: ${px:.2f})")
+        st.markdown(f"### 📡 Monitoring Interface: {ticker} (Buffered Price: ${px:.2f})")
         st.write(f"**Signal State:** `{sig}` | **Active Positions:** {slots} / 4")
         
         # --- POSITION LEDGER GRID ---
@@ -241,7 +243,7 @@ else:
                     "Asset": t['ticker'], "Entry Px": f"${t['price']:.2f}", "Current Px": f"${cur:.2f}", "Qty": t['quantity'], "Unrealized Profit": f"${pnl:.2f}"
                 })
                 
-                # SELLING AUTOMATION RULES (Hard Stop or Mathematical Crossover reversal)
+                # SELLING AUTOMATION RULES
                 if auto_on:
                     if cur <= stop_price or cur >= target_price or (t['ticker'] == ticker and sig == "🔴 ULTRA SELL"):
                         try:
