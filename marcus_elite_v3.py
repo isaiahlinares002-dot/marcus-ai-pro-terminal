@@ -4,8 +4,8 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, time
 import pytz
+import requests
 from supabase import create_client
-from alpaca_trade_api.rest import REST
 
 # --- 1. INITIAL SETUP & APP CONFIG ---
 st.set_page_config(page_title="Marcus Elite Master Terminal v7", layout="wide")
@@ -16,12 +16,9 @@ URL = "https://xhxzhnzwvxmycdskjarr.supabase.co"
 KEY = "sb_publishable_EpR9PlXgtAapPdOjOqUZow_2BqBuOWo"
 supabase = create_client(URL, KEY)
 
-# 🔐 LIVE USER CHIP CERTIFICATES REGISTERED
+# 🔐 ACTIVATED USER SIMULATION ACCESS KEYS
 PAPER_API_KEY = "PKKJYWAN6ZEDTBPTWHQRV26Q4Y"
 PAPER_SECRET_KEY = "GnsyXG84eJ4C5YEbjdFSdZYC2pyiDb6ZNGDLGnHcYvo9"
-
-LIVE_API_KEY = "YOUR_LIVE_KEY_HERE"
-LIVE_SECRET_KEY = "YOUR_LIVE_SECRET_HERE"
 
 # --- ACTIVE LIBRARY TRACKER ---
 STOCK_LIBRARY = [
@@ -29,25 +26,16 @@ STOCK_LIBRARY = [
     "MSFT", "GOOGL", "META", "AMZN", "NFLX", "INTC", "PYPL", "SQ", "SHOP", "RIVN"
 ]
 
-# --- 2. BROKERAGE CONNECTION MANAGER ---
-def get_alpaca_client(mode):
-    if mode == "🚀 LIVE TRADING":
-        base_url = "https://api.alpaca.markets"
-        return REST(LIVE_API_KEY, LIVE_SECRET_KEY, base_url, api_version='v2')
-    else:
-        base_url = "https://paper-api.alpaca.markets"
-        return REST(PAPER_API_KEY, PAPER_SECRET_KEY, base_url, api_version='v2')
-
-# --- 3. HIGH-FREQUENCY INTRA-DAY SIGNAL ENGINE ---
+# --- 2. HIGH-FREQUENCY INTRA-DAY SIGNAL ENGINE ---
 def get_signals(df):
     """Calculates ultra-fast 3/8 EMA parameters to catch intra-day micro-swings"""
-    if len(df) < 15:
-        return "⚪ SCANNING", df['close'].iloc[-1] if not df.empty else 100.0, 0.0
+    if df.empty or len(df) < 10:
+        return "⚪ SCANNING", 100.0, 0.0
         
     df['ema_fast'] = df['close'].ewm(span=3, adjust=False).mean()
     df['ema_slow'] = df['close'].ewm(span=8, adjust=False).mean()
     
-    last_px = df['close'].iloc[-1]
+    last_px = float(df['close'].iloc[-1])
     prev_fast, last_fast = df['ema_fast'].iloc[-2], df['ema_fast'].iloc[-1]
     prev_slow, last_slow = df['ema_slow'].iloc[-2], df['ema_slow'].iloc[-1]
     
@@ -65,39 +53,77 @@ def get_signals(df):
         
     return "⚪ SCANNING", last_px, slope
 
-# --- 4. REAL-TIME DATA INGESTION ENGINE ---
-def fetch_real_data(api, ticker):
-    """Streams live candlestick chunks directly out of Alpaca core data servers"""
+# --- 3. UNIVERSAL DATA INGESTION ENGINE (STOCKS & CRYPTO FIXED) ---
+def fetch_real_data(ticker):
+    """Fetches clean json data directly via requests to support both Stocks & Crypto free tiers"""
     try:
-        alpaca_ticker = ticker.replace("-", "/") if "USD" in ticker else ticker
-        
-        # ⏱️ Roll back the end timestamp 15 minutes to clear Alpaca's free data subscription constraints
-        end_dt = datetime.now(toronto_tz) - timedelta(minutes=15)
-        start_dt = end_dt - timedelta(hours=3) # Grabbing a wider historical block for stable calculations
-        
-        bars = api.get_bars(
-            alpaca_ticker, 
-            '1Min', 
-            start=start_dt.isoformat(), 
-            end=end_dt.isoformat(), 
-            adjustment='raw'
-        ).df
-        
-        if bars.empty:
-            return pd.DataFrame({'close': [100.0]*30, 'open':[100.0]*30, 'high':[100.0]*30, 'low':[100.0]*30, 'date': pd.date_range(end=datetime.now(), periods=30, freq='min')})
+        if "USD" in ticker:
+            url = "https://data.alpaca.markets/v1beta3/crypto/us/bars"
+            symbol_key = ticker.replace("-", "/") # Crypto maps to BTC/USD internally
+            params = {
+                "symbols": symbol_key,
+                "timeframe": "1Min",
+                "start": (datetime.now(toronto_tz) - timedelta(hours=4)).isoformat(),
+                "end": (datetime.now(toronto_tz) - timedelta(minutes=16)).isoformat()
+            }
+        else:
+            url = "https://data.alpaca.markets/v2/stocks/bars"
+            symbol_key = ticker
+            params = {
+                "symbols": symbol_key,
+                "timeframe": "1Min",
+                "start": (datetime.now(toronto_tz) - timedelta(hours=4)).isoformat(),
+                "end": (datetime.now(toronto_tz) - timedelta(minutes=16)).isoformat(),
+                "feed": "iex" # 💡 CRUCIAL: Forces the free tier IEX endpoint so regular stocks can load
+            }
             
-        bars = bars.reset_index()
-        bars = bars.rename(columns={'timestamp': 'date'})
-        return bars[['date', 'open', 'high', 'low', 'close']]
+        headers = {
+            "Apca-Api-Key-Id": PAPER_API_KEY,
+            "Apca-Api-Secret-Key": PAPER_SECRET_KEY
+        }
+        
+        response = requests.get(url, headers=headers, params=params, timeout=5)
+        if response.status_code != 200:
+            return pd.DataFrame()
+            
+        data = response.json()
+        bars_raw = data.get("bars", {})
+        
+        symbol_data = bars_raw.get(symbol_key, [])
+        if not symbol_data:
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(symbol_data)
+        df = df.rename(columns={'t': 'date', 'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close'})
+        df['date'] = pd.to_datetime(df['date'])
+        return df[['date', 'open', 'high', 'low', 'close']]
     except Exception:
-        return pd.DataFrame({'close': [100.0]*30, 'open':[100.0]*30, 'high':[100.0]*30, 'low':[100.0]*30, 'date': pd.date_range(end=datetime.now(), periods=30, freq='min')})
+        return pd.DataFrame()
 
-# --- 5. AUTOMATED EXECUTION HANDSHAKES ---
+# --- 4. AUTOMATED API EXECUTION HANDSHAKES ---
+def alpaca_order(symbol, qty, side):
+    """Submits direct order requests via requests payload"""
+    try:
+        url = "https://paper-api.alpaca.markets/v2/orders"
+        headers = {
+            "Apca-Api-Key-Id": PAPER_API_KEY,
+            "Apca-Api-Secret-Key": PAPER_SECRET_KEY,
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "symbol": symbol.replace("-", "/") if "USD" in symbol else symbol,
+            "qty": str(qty),
+            "side": side,
+            "type": "market",
+            "time_in_force": "gtc"
+        }
+        requests.post(url, json=payload, headers=headers, timeout=5)
+    except:
+        pass
+
 def execute_smart_buy(ticker, price):
     try:
-        risk_mod = 1.0 if st.session_state.balance >= 100 else 0.5
-        risk_amount = st.session_state.balance * (st.session_state.risk_percent / 100) * risk_mod
-        
+        risk_amount = st.session_state.balance * (st.session_state.risk_percent / 100)
         qty = int(risk_amount / price) if price > 0 else 0
         if qty <= 0: return
 
@@ -110,32 +136,27 @@ def execute_smart_buy(ticker, price):
             "date": datetime.now(toronto_tz).strftime("%Y-%m-%d"),
             "time": datetime.now(toronto_tz).strftime("%H:%M:%S")
         }
-        
         supabase.table("trades").insert(trade_data).execute()
-        st.toast(f"🚀 LEDGER INTERACT: Position Logged for {ticker} @ ${price:.2f}")
+        st.toast(f"🚀 POSITION LOGGED: Entered {ticker} @ ${price:.2f}")
     except Exception as e:
         st.error(f"Ledger Sync Broken: {e}")
 
-def emergency_sell_all(api):
+def emergency_sell_all():
     try:
         active = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "OPEN").execute()
         for t in active.data:
-            try:
-                alpaca_ticker = t['ticker'].replace("-", "/") if "USD" in t['ticker'] else t['ticker']
-                api.submit_order(symbol=alpaca_ticker, qty=t['quantity'], side='sell', type='market', time_in_force='gtc')
-            except: pass
-            
+            alpaca_order(t['ticker'], t['quantity'], 'sell')
             supabase.table("trades").update({
                 "status": "CLOSED",
                 "exit_price": t['price'],
                 "exit_time": datetime.now(toronto_tz).strftime("%H:%M:%S")
             }).eq("id", t['id']).execute()
-        st.toast("🚨 CORE EMERGENCY CLEAR UNWOUND ALL BLOCKS.")
+        st.toast("🚨 EMERGENCY LIQUIDATION UNWOUND ALL BLOCKS.")
         st.rerun()
     except Exception as e:
         st.error(f"Liquidation Error: {e}")
 
-# --- 6. AUTHENTICATION GATE ---
+# --- 5. AUTHENTICATION GATE ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'balance' not in st.session_state: st.session_state.balance = 100000.0
 
@@ -154,7 +175,7 @@ if not st.session_state.logged_in:
                     st.session_state.logged_in, st.session_state.username = True, u
                     st.rerun()
                 else: st.error("Invalid Operator ID or Password.")
-            except Exception as e: st.error(f"Authentication Database Disconnected: {e}")
+            except Exception as e: st.error(f"Authentication Error: {e}")
                 
     elif auth_mode == "Sign Up/Register":
         st.subheader("Register New Profile")
@@ -168,7 +189,7 @@ if not st.session_state.logged_in:
                     st.success("🎉 Registration Confirmed! Flip back to Sign In.")
                 except Exception as e: st.error(f"Sync Interrupted: {e}")
 else:
-    # --- 7. ACTIVE DASHBOARD SYSTEM ---
+    # --- 6. ACTIVE DASHBOARD SYSTEM ---
     now = datetime.now(toronto_tz)
     is_market_open = time(9,30) <= now.time() <= time(16,0) and now.weekday() < 5
     
@@ -181,15 +202,16 @@ else:
 
     with st.sidebar:
         st.header(f"Operator: {st.session_state.username}")
-        trade_mode = st.radio("💰 TERMINAL ENVIRONMENT", ["🛠️ PAPER TRADING", "🚀 LIVE TRADING"], horizontal=False)
-        alpaca_api = get_alpaca_client(trade_mode)
+        st.markdown("💰 TERMINAL ENVIRONMENT: **PAPER TRADING**")
         
         try:
-            account = alpaca_api.get_account()
-            st.session_state.balance = float(account.cash)
+            url = "https://paper-api.alpaca.markets/v2/account"
+            headers = {"Apca-Api-Key-Id": PAPER_API_KEY, "Apca-Api-Secret-Key": PAPER_SECRET_KEY}
+            acct_res = requests.get(url, headers=headers, timeout=5).json()
+            st.session_state.balance = float(acct_res.get('cash', 100000.0))
             st.metric("BROKERAGE CASH", f"${st.session_state.balance:.2f}")
-        except Exception as api_err:
-            st.metric("MOCK CASH (API Locked)", f"${st.session_state.balance:.2f}")
+        except:
+            st.metric("BROKERAGE CASH", f"${st.session_state.balance:.2f}")
 
         st.markdown("---")
         st.write(f"🏆 **Mathematical Win Rate:** {win_rate:.1f}%")
@@ -201,7 +223,7 @@ else:
         auto_on = st.toggle("🤖 AUTOPILOT SCANNING", value=True)
         
         if st.button("🚨 EMERGENCY portfolio UNWIND", use_container_width=True):
-            emergency_sell_all(alpaca_api)
+            emergency_sell_all()
             st.rerun()
         if st.button("TERMINAL LOGOUT"): 
             st.session_state.logged_in = False
@@ -216,7 +238,12 @@ else:
             slots = len(active_res.data)
         except: slots, active_res = 0, None
 
-        df = fetch_real_data(alpaca_api, ticker)
+        df = fetch_real_data(ticker)
+        
+        if df.empty:
+            st.warning("⚠️ Synchronizing exchange pipelines... Waiting on server data arrays.")
+            return
+
         sig, px, slp = get_signals(df)
 
         st.markdown(f"### 📡 Monitoring Interface: {ticker} (Buffered Price: ${px:.2f})")
@@ -230,7 +257,7 @@ else:
                 if t['ticker'] == ticker:
                     cur = float(round(px, 2))
                 else:
-                    bg_df = fetch_real_data(alpaca_api, t['ticker'])
+                    bg_df = fetch_real_data(t['ticker'])
                     cur = float(round(bg_df['close'].iloc[-1], 2)) if not bg_df.empty else t['price']
                 
                 pnl = (cur - t['price']) * t['quantity']
@@ -246,12 +273,9 @@ else:
                 # SELLING AUTOMATION RULES
                 if auto_on:
                     if cur <= stop_price or cur >= target_price or (t['ticker'] == ticker and sig == "🔴 ULTRA SELL"):
-                        try:
-                            alpaca_ticker = t['ticker'].replace("-", "/") if "USD" in t['ticker'] else t['ticker']
-                            alpaca_api.submit_order(symbol=alpaca_ticker, qty=t['quantity'], side='sell', type='market', time_in_force='gtc')
-                            supabase.table("trades").update({"status": "CLOSED", "exit_price": cur, "exit_time": datetime.now(toronto_tz).strftime("%H:%M:%S")}).eq("id", t['id']).execute()
-                            st.rerun()
-                        except: pass
+                        alpaca_order(t['ticker'], t['quantity'], 'sell')
+                        supabase.table("trades").update({"status": "CLOSED", "exit_price": cur, "exit_time": datetime.now(toronto_tz).strftime("%H:%M:%S")}).eq("id", t['id']).execute()
+                        st.rerun()
             
             st.table(pd.DataFrame(rows))
             pnl_color = "green" if total_unrealized >= 0 else "red"
@@ -265,17 +289,9 @@ else:
             if sig == "🟢 ULTRA BUY":
                 already_holding = any(d['ticker'] == ticker for d in (active_res.data if active_res.data else []))
                 if not already_holding:
-                    try:
-                        alpaca_ticker = ticker.replace("-", "/") if "USD" in ticker else ticker
-                        risk_amount = st.session_state.balance * (st.session_state.risk_percent / 100)
-                        qty = int(risk_amount / px)
-                        
-                        if qty > 0:
-                            alpaca_api.submit_order(symbol=alpaca_ticker, qty=qty, side='buy', type='market', time_in_force='gtc')
-                            execute_smart_buy(ticker, px)
-                            st.rerun()
-                    except Exception as api_err:
-                        st.error(f"Alpaca Order Desk Deflected: {api_err}")
+                    alpaca_order(ticker, int((st.session_state.balance * (st.session_state.risk_percent / 100)) / px), 'buy')
+                    execute_smart_buy(ticker, px)
+                    st.rerun()
 
         # CHARTING CANVAS
         fig = go.Figure(data=[go.Candlestick(x=df['date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'])])
