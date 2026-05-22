@@ -16,7 +16,7 @@ URL = "https://xhxzhnzwvxmycdskjarr.supabase.co"
 KEY = "sb_publishable_EpR9PlXgtAapPdOjOqUZow_2BqBuOWo"
 supabase = create_client(URL, KEY)
 
-# 🔐 ACTIVATED USER SIMULATION ACCESS KEYS
+# 🔐 HIGH-SPEED USER PAPER CERTIFICATES REGISTERED
 PAPER_API_KEY = "PKKJYWAN6ZEDTBPTWHQRV26Q4Y"
 PAPER_SECRET_KEY = "GnsyXG84eJ4C5YEbjdFSdZYC2pyiDb6ZNGDLGnHcYvo9"
 
@@ -53,13 +53,13 @@ def get_signals(df):
         
     return "⚪ SCANNING", last_px, slope
 
-# --- 3. UNIVERSAL DATA INGESTION ENGINE (STOCKS & CRYPTO FIXED) ---
+# --- 3. UNIVERSAL DATA INGESTION ENGINE ---
 def fetch_real_data(ticker):
     """Fetches clean json data directly via requests to support both Stocks & Crypto free tiers"""
     try:
         if "USD" in ticker:
             url = "https://data.alpaca.markets/v1beta3/crypto/us/bars"
-            symbol_key = ticker.replace("-", "/") # Crypto maps to BTC/USD internally
+            symbol_key = ticker.replace("-", "/")
             params = {
                 "symbols": symbol_key,
                 "timeframe": "1Min",
@@ -74,7 +74,7 @@ def fetch_real_data(ticker):
                 "timeframe": "1Min",
                 "start": (datetime.now(toronto_tz) - timedelta(hours=4)).isoformat(),
                 "end": (datetime.now(toronto_tz) - timedelta(minutes=16)).isoformat(),
-                "feed": "iex" # 💡 CRUCIAL: Forces the free tier IEX endpoint so regular stocks can load
+                "feed": "iex"
             }
             
         headers = {
@@ -102,7 +102,7 @@ def fetch_real_data(ticker):
 
 # --- 4. AUTOMATED API EXECUTION HANDSHAKES ---
 def alpaca_order(symbol, qty, side):
-    """Submits direct order requests via requests payload"""
+    """Submits raw order execution structures directly to Alpaca trading desks"""
     try:
         url = "https://paper-api.alpaca.markets/v2/orders"
         headers = {
@@ -121,11 +121,15 @@ def alpaca_order(symbol, qty, side):
     except:
         pass
 
-def execute_smart_buy(ticker, price):
+def execute_smart_buy(ticker, price, slots_count):
+    """Saves executed order configurations safely into the Supabase accounting matrix"""
     try:
-        risk_amount = st.session_state.balance * (st.session_state.risk_percent / 100)
+        # Split power dynamically relative to total targeted slot blocks
+        power_ratio = 1 / 5 
+        risk_amount = st.session_state.balance * (st.session_state.risk_percent / 100) * power_ratio
+        
         qty = int(risk_amount / price) if price > 0 else 0
-        if qty <= 0: return
+        if qty <= 0: return False
 
         trade_data = {
             "username": st.session_state.username,
@@ -137,11 +141,14 @@ def execute_smart_buy(ticker, price):
             "time": datetime.now(toronto_tz).strftime("%H:%M:%S")
         }
         supabase.table("trades").insert(trade_data).execute()
-        st.toast(f"🚀 POSITION LOGGED: Entered {ticker} @ ${price:.2f}")
+        st.toast(f"🟢 AUTO ENTRY TRIGGERED: {ticker} ({qty} units) @ ${price:.2f}")
+        return True
     except Exception as e:
         st.error(f"Ledger Sync Broken: {e}")
+        return False
 
 def emergency_sell_all():
+    """Instantly liquidates all positions across every open channel to cash out"""
     try:
         active = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "OPEN").execute()
         for t in active.data:
@@ -151,7 +158,7 @@ def emergency_sell_all():
                 "exit_price": t['price'],
                 "exit_time": datetime.now(toronto_tz).strftime("%H:%M:%S")
             }).eq("id", t['id']).execute()
-        st.toast("🚨 EMERGENCY LIQUIDATION UNWOUND ALL BLOCKS.")
+        st.toast("💰 CASH-OUT SUCESSFUL: All structural assets liquidated cleanly.")
         st.rerun()
     except Exception as e:
         st.error(f"Liquidation Error: {e}")
@@ -202,34 +209,34 @@ else:
 
     with st.sidebar:
         st.header(f"Operator: {st.session_state.username}")
-        st.markdown("💰 TERMINAL ENVIRONMENT: **PAPER TRADING**")
+        st.markdown("💰 ENVIRONMENT: **AUTONOMOUS PAPER DESK**")
         
         try:
             url = "https://paper-api.alpaca.markets/v2/account"
             headers = {"Apca-Api-Key-Id": PAPER_API_KEY, "Apca-Api-Secret-Key": PAPER_SECRET_KEY}
             acct_res = requests.get(url, headers=headers, timeout=5).json()
             st.session_state.balance = float(acct_res.get('cash', 100000.0))
-            st.metric("BROKERAGE CASH", f"${st.session_state.balance:.2f}")
+            st.metric("BROKERAGE CASH BALANCE", f"${st.session_state.balance:.2f}")
         except:
-            st.metric("BROKERAGE CASH", f"${st.session_state.balance:.2f}")
+            st.metric("BROKERAGE CASH BALANCE", f"${st.session_state.balance:.2f}")
 
         st.markdown("---")
-        st.write(f"🏆 **Mathematical Win Rate:** {win_rate:.1f}%")
-        st.caption(f"Historical Settlements: {total_closed}")
+        st.write(f"🏆 **System Win Rate:** {win_rate:.1f}%")
+        st.caption(f"Settled Trades: {total_closed}")
         st.markdown("---")
 
-        st.session_state.risk_percent = st.slider("Trade Power %", 5, 100, 100)
-        st.session_state.target_profit = st.slider("Take Profit %", 0.5, 5.0, 1.5)
-        auto_on = st.toggle("🤖 AUTOPILOT SCANNING", value=True)
+        st.session_state.risk_percent = st.slider("Total Engine Power %", 5, 100, 100)
+        st.session_state.target_profit = st.slider("Take Profit Target %", 0.5, 5.0, 1.2)
+        auto_on = st.toggle("🤖 ENGINE AUTOPILOT MAIN SWITCH", value=True)
         
-        if st.button("🚨 EMERGENCY portfolio UNWIND", use_container_width=True):
+        if st.button("🚨 CASH-OUT & UNWIND PORTFOLIO", use_container_width=True):
             emergency_sell_all()
             st.rerun()
         if st.button("TERMINAL LOGOUT"): 
             st.session_state.logged_in = False
             st.rerun()
 
-    selected_ticker = st.selectbox("Focus Asset Tracker", STOCK_LIBRARY, key="focus_asset_selector")
+    selected_ticker = st.selectbox("Focal Analytics Display View", STOCK_LIBRARY, key="focus_asset_selector")
 
     @st.fragment(run_every=5)
     def live_engine(ticker):
@@ -238,16 +245,37 @@ else:
             slots = len(active_res.data)
         except: slots, active_res = 0, None
 
-        df = fetch_real_data(ticker)
+        # --- 📈 7. PARALLEL CALCULATION ENGINE & TOP FINDER ---
+        st.markdown("### 📡 Live Calculation Radar (Scanning Entire Library...)")
+        radar_data = []
+        valid_buys = []
         
+        active_scan_list = STOCK_LIBRARY if is_market_open else ["ETH-USD", "BTC-USD", "SOL-USD"]
+        
+        for asset in active_scan_list:
+            asset_df = fetch_real_data(asset)
+            if not asset_df.empty:
+                sig, px, slp = get_signals(asset_df)
+                radar_data.append({"Asset": asset, "Price": f"${px:.2f}", "Calculated State": sig, "Slope Momentum": slp})
+                
+                if sig == "🟢 ULTRA BUY":
+                    valid_buys.append({"ticker": asset, "price": px, "slope": slp})
+                    
+        if radar_data:
+            radar_df = pd.DataFrame(radar_data).sort_values(by="Slope Momentum", ascending=False)
+            st.dataframe(radar_df, use_container_width=True)
+        else:
+            st.warning("Synchronizing multi-channel arrays...")
+
+        # Get data chunk for the selected focal chart view
+        df = fetch_real_data(ticker)
         if df.empty:
-            st.warning("⚠️ Synchronizing exchange pipelines... Waiting on server data arrays.")
+            st.info("Loading visualization stream candles...")
             return
 
-        sig, px, slp = get_signals(df)
-
-        st.markdown(f"### 📡 Monitoring Interface: {ticker} (Buffered Price: ${px:.2f})")
-        st.write(f"**Signal State:** `{sig}` | **Active Positions:** {slots} / 4")
+        _, focus_px, _ = get_signals(df)
+        st.markdown(f"#### 📊 Focal Chart Feed: {ticker} (${focus_px:.2f})")
+        st.write(f"**Autonomous Channels Active:** {slots} / 5 Running Positions")
         
         # --- POSITION LEDGER GRID ---
         if slots > 0:
@@ -255,7 +283,7 @@ else:
             rows = []
             for t in active_res.data:
                 if t['ticker'] == ticker:
-                    cur = float(round(px, 2))
+                    cur = float(round(focus_px, 2))
                 else:
                     bg_df = fetch_real_data(t['ticker'])
                     cur = float(round(bg_df['close'].iloc[-1], 2)) if not bg_df.empty else t['price']
@@ -270,28 +298,46 @@ else:
                     "Asset": t['ticker'], "Entry Px": f"${t['price']:.2f}", "Current Px": f"${cur:.2f}", "Qty": t['quantity'], "Unrealized Profit": f"${pnl:.2f}"
                 })
                 
-                # SELLING AUTOMATION RULES
+                # SELLING AUTOMATION RULES (Evaluated directly across parallel structures)
                 if auto_on:
-                    if cur <= stop_price or cur >= target_price or (t['ticker'] == ticker and sig == "🔴 ULTRA SELL"):
+                    asset_chk = next((item for item in radar_data if item["Asset"] == t['ticker']), None)
+                    current_sig = asset_chk["Calculated State"] if asset_chk else "⚪ SCANNING"
+                    
+                    if cur <= stop_price or cur >= target_price or current_sig == "🔴 ULTRA SELL":
                         alpaca_order(t['ticker'], t['quantity'], 'sell')
                         supabase.table("trades").update({"status": "CLOSED", "exit_price": cur, "exit_time": datetime.now(toronto_tz).strftime("%H:%M:%S")}).eq("id", t['id']).execute()
+                        st.toast(f"🔴 AUTO EXIT TRIGGERED: Closed position for {t['ticker']} at ${cur:.2f}")
                         st.rerun()
             
             st.table(pd.DataFrame(rows))
             pnl_color = "green" if total_unrealized >= 0 else "red"
             st.markdown(f"#### Total Unrealized PnL Profile: :{pnl_color}[${total_unrealized:.2f}]")
         else:
-            st.info("Autopilot Active: Searching streaming structures for entry markers...")
+            st.info("Autopilot Active: System searching calculations to populate free tracking tracks...")
 
-        # BUYING AUTOMATION RULES
-        is_crypto = "USD" in ticker
-        if auto_on and (is_market_open or is_crypto) and slots < 4:
-            if sig == "🟢 ULTRA BUY":
-                already_holding = any(d['ticker'] == ticker for d in (active_res.data if active_res.data else []))
+        # MULTI-SLOT AUTONOMOUS BUY RULES (Fires automatically on top calculated slots)
+        if auto_on and slots < 5 and valid_buys:
+            # Sort the mathematically valid buys by slope momentum strength to pull top setups
+            sorted_buys = sorted(valid_buys, key=lambda x: x['slope'], reverse=True)
+            
+            for potential_buy in sorted_buys:
+                if slots >= 5:
+                    break
+                    
+                already_holding = any(d['ticker'] == potential_buy['ticker'] for d in (active_res.data if active_res.data else []))
                 if not already_holding:
-                    alpaca_order(ticker, int((st.session_state.balance * (st.session_state.risk_percent / 100)) / px), 'buy')
-                    execute_smart_buy(ticker, px)
-                    st.rerun()
+                    alpaca_ticker = potential_buy['ticker']
+                    px = potential_buy['price']
+                    
+                    # Calculate position size split
+                    power_ratio = 1 / 5
+                    risk_amount = st.session_state.balance * (st.session_state.risk_percent / 100) * power_ratio
+                    qty = int(risk_amount / px)
+                    
+                    if qty > 0:
+                        alpaca_order(alpaca_ticker, qty, 'buy')
+                        if execute_smart_buy(alpaca_ticker, px, slots):
+                            st.rerun()
 
         # CHARTING CANVAS
         fig = go.Figure(data=[go.Candlestick(x=df['date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'])])
