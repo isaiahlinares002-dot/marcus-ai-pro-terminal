@@ -33,6 +33,9 @@ def get_signals(df):
     if df.empty or len(df) < 10:
         return "⚪ SCANNING", 100.0, 0.0
         
+    # Standardize column strings to guarantee compatibility
+    df.columns = [str(x).lower() for x in df.columns]
+    
     df['ema_fast'] = df['close'].ewm(span=3, adjust=False).mean()
     df['ema_slow'] = df['close'].ewm(span=8, adjust=False).mean()
     
@@ -58,17 +61,15 @@ def get_signals(df):
 def fetch_real_data(ticker):
     """Fetches clean real-time 1-minute candlestick data instantly without delays"""
     try:
-        # yfinance handles tickers natively. It works directly for AAPL, BTC-USD, etc.
         ticker_obj = yf.Ticker(ticker)
-        # Fetch the last 1 day of 1-minute bars (provides maximum real-time granularity)
         df_raw = ticker_obj.history(period="1d", interval="1m")
         
         if df_raw.empty:
             return pd.DataFrame()
             
         df = df_raw.reset_index()
-        # Handle formatting to keep columns identical to our analytical structure
-        df = df.rename(columns={'Datetime': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close'})
+        # Bulletproof case mapping to prevent formula drift
+        df.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'dividends', 'stock splits'][:-8+len(df.columns)]
         df['date'] = pd.to_datetime(df['date']).dt.tz_convert("America/Toronto")
         return df[['date', 'open', 'high', 'low', 'close']]
     except Exception:
@@ -84,7 +85,6 @@ def alpaca_order(symbol, qty, side):
             "Apca-Api-Secret-Key": PAPER_SECRET_KEY,
             "Content-Type": "application/json"
         }
-        # Alpaca crypto routing expects hyphens replaced with slashes
         payload = {
             "symbol": symbol.replace("-", "/") if "USD" in symbol else symbol,
             "qty": str(qty),
@@ -92,11 +92,12 @@ def alpaca_order(symbol, qty, side):
             "type": "market",
             "time_in_force": "gtc"
         }
-        requests.post(url, json=payload, headers=headers, timeout=5)
+        r = requests.post(url, json=payload, headers=headers, timeout=5)
+        return r.status_code == 200 or r.status_code == 201
     except:
-        pass
+        return False
 
-def execute_smart_buy(ticker, price, slots_count):
+def execute_smart_buy(ticker, price):
     """Saves executed order configurations safely into the Supabase accounting matrix"""
     try:
         power_ratio = 1 / 5 
@@ -115,7 +116,7 @@ def execute_smart_buy(ticker, price, slots_count):
             "time": datetime.now(toronto_tz).strftime("%H:%M:%S")
         }
         supabase.table("trades").insert(trade_data).execute()
-        st.toast(f"🟢 AUTO ENTRY TRIGGERED: {ticker} ({qty} units) @ ${price:.2f}")
+        st.toast(f"🟢 AUTO ENTRY RECORDED: {ticker} ({qty} units) @ ${price:.2f}")
         return True
     except Exception as e:
         st.error(f"Ledger Sync Broken: {e}")
@@ -217,14 +218,15 @@ else:
         try:
             active_res = supabase.table("trades").select("*").eq("username", st.session_state.username).eq("status", "OPEN").execute()
             slots = len(active_res.data)
-        except: slots, active_res = 0, None
+            current_held_tickers = [d['ticker'] for d in active_res.data] if active_res.data else []
+        except: 
+            slots, active_res, current_held_tickers = 0, None, []
 
         # --- 📈 7. PARALLEL CALCULATION ENGINE & TOP FINDER ---
         st.markdown("### 📡 Live Calculation Radar (Scanning Entire Library via Free Live Streams)")
         radar_data = []
         valid_buys = []
         
-        # Free Live Stocks run Mon-Fri market hours; Crypto runs 24/7/365
         active_scan_list = STOCK_LIBRARY if is_market_open else ["ETH-USD", "BTC-USD", "SOL-USD"]
         
         for asset in active_scan_list:
@@ -233,7 +235,7 @@ else:
                 sig, px, slp = get_signals(asset_df)
                 radar_data.append({"Asset": asset, "Price": f"${px:.2f}", "Calculated State": sig, "Slope Momentum": slp})
                 
-                if sig == "🟢 ULTRA BUY":
+                if sig == "🟢 ULTRA BUY" and asset not in current_held_tickers:
                     valid_buys.append({"ticker": asset, "price": px, "slope": slp})
                     
         if radar_data:
@@ -298,19 +300,19 @@ else:
                 if slots >= 5:
                     break
                     
-                already_holding = any(d['ticker'] == potential_buy['ticker'] for d in (active_res.data if active_res.data else []))
-                if not already_holding:
-                    alpaca_ticker = potential_buy['ticker']
-                    px = potential_buy['price']
-                    
-                    power_ratio = 1 / 5
-                    risk_amount = st.session_state.balance * (st.session_state.risk_percent / 100) * power_ratio
-                    qty = int(risk_amount / px)
-                    
-                    if qty > 0:
-                        alpaca_order(alpaca_ticker, qty, 'buy')
-                        if execute_smart_buy(alpaca_ticker, px, slots):
-                            st.rerun()
+                alpaca_ticker = potential_buy['ticker']
+                px = potential_buy['price']
+                
+                power_ratio = 1 / 5
+                risk_amount = st.session_state.balance * (st.session_state.risk_percent / 100) * power_ratio
+                qty = int(risk_amount / px)
+                
+                if qty > 0:
+                    # Execute order on Alpaca desk first, verify link status, then commit ledger row
+                    success = alpaca_order(alpaca_ticker, qty, 'buy')
+                    if success:
+                        execute_smart_buy(alpaca_ticker, px)
+                        st.rerun()
 
         # CHARTING CANVAS
         fig = go.Figure(data=[go.Candlestick(x=df['date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'])])
