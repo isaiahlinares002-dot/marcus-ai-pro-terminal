@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 from datetime import datetime, time
 import pytz
 import requests
-import yfinance as yf
 from supabase import create_client
 
 # --- 1. INITIAL SETUP & APP CONFIG ---
@@ -21,7 +20,7 @@ supabase = create_client(URL, KEY)
 PAPER_API_KEY = "PKKJYWAN6ZEDTBPTWHQRV26Q4Y"
 PAPER_SECRET_KEY = "GnsyXG84eJ4C5YEbjdFSdZYC2pyiDb6ZNGDLGnHcYvo9"
 
-# --- ACTIVE LIBRARY TRACKER (MAPPED TO YAHOO TICKER STRINGS) ---
+# --- ACTIVE LIBRARY TRACKER ---
 STOCK_LIBRARY = [
     "ETH-USD", "BTC-USD", "SOL-USD", "AAPL", "TSLA", "NVDA", "PLTR", "COIN", "VNCE", "AMD",
     "MSFT", "GOOGL", "META", "AMZN", "NFLX", "INTC", "PYPL", "SQ", "SHOP", "RIVN"
@@ -33,9 +32,6 @@ def get_signals(df):
     if df.empty or len(df) < 10:
         return "⚪ SCANNING", 100.0, 0.0
         
-    # Standardize column strings to guarantee compatibility
-    df.columns = [str(x).lower() for x in df.columns]
-    
     df['ema_fast'] = df['close'].ewm(span=3, adjust=False).mean()
     df['ema_slow'] = df['close'].ewm(span=8, adjust=False).mean()
     
@@ -57,20 +53,34 @@ def get_signals(df):
         
     return "⚪ SCANNING", last_px, slope
 
-# --- 3. FREE REAL-TIME DATA ENGINE (YAHOO FINANCE SWAP) ---
+# --- 3. HIGH-SPEED DIRECT YAHOO ENDPOINT STREAM (NO YFINANCE PACKET REQUIRED) ---
 def fetch_real_data(ticker):
-    """Fetches clean real-time 1-minute candlestick data instantly without delays"""
+    """Hits Yahoo's raw public endpoint via native requests to completely bypass rate-blocks"""
     try:
-        ticker_obj = yf.Ticker(ticker)
-        df_raw = ticker_obj.history(period="1d", interval="1m")
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1d&interval=1m"
         
-        if df_raw.empty:
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code != 200:
             return pd.DataFrame()
             
-        df = df_raw.reset_index()
-        # Bulletproof case mapping to prevent formula drift
-        df.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'dividends', 'stock splits'][:-8+len(df.columns)]
-        df['date'] = pd.to_datetime(df['date']).dt.tz_convert("America/Toronto")
+        data = response.json()
+        result = data['chart']['result'][0]
+        
+        timestamps = result['timestamp']
+        indicators = result['indicators']['quote'][0]
+        
+        df = pd.DataFrame({
+            'date': pd.to_datetime(timestamps, unit='s', utc=True),
+            'open': indicators['open'],
+            'high': indicators['high'],
+            'low': indicators['low'],
+            'close': indicators['close']
+        })
+        
+        # Clean out any empty missing market micro-ticks safely
+        df = df.dropna().reset_index(drop=True)
+        df['date'] = df['date'].dt.tz_convert("America/Toronto")
         return df[['date', 'open', 'high', 'low', 'close']]
     except Exception:
         return pd.DataFrame()
@@ -227,6 +237,7 @@ else:
         radar_data = []
         valid_buys = []
         
+        # Free Live Stocks run Mon-Fri market hours; Crypto runs 24/7/365
         active_scan_list = STOCK_LIBRARY if is_market_open else ["ETH-USD", "BTC-USD", "SOL-USD"]
         
         for asset in active_scan_list:
@@ -308,7 +319,6 @@ else:
                 qty = int(risk_amount / px)
                 
                 if qty > 0:
-                    # Execute order on Alpaca desk first, verify link status, then commit ledger row
                     success = alpaca_order(alpaca_ticker, qty, 'buy')
                     if success:
                         execute_smart_buy(alpaca_ticker, px)
