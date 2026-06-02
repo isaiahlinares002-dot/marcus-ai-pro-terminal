@@ -16,9 +16,9 @@ URL = "https://xhxzhnzwvxmycdskjarr.supabase.co"
 KEY = "sb_publishable_EpR9PlXgtAapPdOjOqUZow_2BqBuOWo"
 supabase = create_client(URL, KEY)
 
-# 🔐 HIGH-SPEED USER PAPER CERTIFICATES REGISTERED
-PAPER_API_KEY = "PKKJYWAN6ZEDTBPTWHQRV26Q4Y"
-PAPER_SECRET_KEY = "GnsyXG84eJ4C5YEbjdFSdZYC2pyiDb6ZNGDLGnHcYvo9"
+# 🔐 HIGH-SPEED USER PAPER CERTIFICATES REGISTERED (UPDATED 2026 KEYS)
+PAPER_API_KEY = "PKUN7M6UTLP7FMIUH7BJ7V2LFA"
+PAPER_SECRET_KEY = "5TaHtWgdei798mgjEzBdDogbKqGSnbY6NKUTHeztBxHS"
 
 # --- ACTIVE LIBRARY TRACKER ---
 STOCK_LIBRARY = [
@@ -150,7 +150,7 @@ def emergency_sell_all():
 
 # --- 5. AUTHENTICATION GATE ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'balance' not in st.session_state: st.session_state.balance = 100000.0
+if 'balance' not in st.session_state: st.session_state.balance = 1000.0
 
 if not st.session_state.logged_in:
     st.title("🚀 Marcus Elite Terminal")
@@ -200,10 +200,11 @@ else:
             url = "https://paper-api.alpaca.markets/v2/account"
             headers = {"Apca-Api-Key-Id": PAPER_API_KEY, "Apca-Api-Secret-Key": PAPER_SECRET_KEY}
             acct_res = requests.get(url, headers=headers, timeout=5).json()
-            st.session_state.balance = float(acct_res.get('cash', 100000.0))
-            st.metric("BROKERAGE CASH BALANCE", f"${st.session_state.balance:.2f}")
+            # UPDATED: Tracks total net equity value instead of strictly raw locked cash
+            st.session_state.balance = float(acct_res.get('equity', 1000.0))
+            st.metric("PORTFOLIO NET VALUE", f"${st.session_state.balance:.2f}")
         except:
-            st.metric("BROKERAGE CASH BALANCE", f"${st.session_state.balance:.2f}")
+            st.metric("PORTFOLIO NET VALUE", f"${st.session_state.balance:.2f}")
 
         st.markdown("---")
         st.write(f"🏆 **System Win Rate:** {win_rate:.1f}%")
